@@ -22,10 +22,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       man-db \
       manpages \
       less \
+      libcap2-bin \
+    # Ubuntu ships ping with cap_net_raw=ep. With all capabilities dropped the
+    # kernel refuses to exec a binary whose effective caps it can't grant, so ping
+    # fails with EPERM. Strip it; the pod's ping_group_range sysctl lets ping use
+    # unprivileged ICMP sockets instead.
+    && setcap -r /usr/bin/ping \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root user `lab` (UID/GID 1000), no sudo.
-RUN groupadd --gid 1000 lab \
+# ubuntu:24.04 ships a default `ubuntu` user holding UID/GID 1000; remove it first.
+RUN userdel --remove ubuntu \
+    && groupadd --gid 1000 lab \
     && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash lab
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
