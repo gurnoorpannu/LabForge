@@ -1,0 +1,340 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildLab > matches the snapshot (review diffs to this file carefully) 1`] = `
+[
+  {
+    "apiVersion": "v1",
+    "kind": "Namespace",
+    "metadata": {
+      "annotations": {
+        "labforge.io/expires-at": "1700002700",
+        "labforge.io/owner": "user-1",
+      },
+      "labels": {
+        "app.kubernetes.io/managed-by": "labforge",
+        "labforge.io/lab-id": "abcdefghijklmnop",
+        "labforge.io/state": "claimed",
+        "pod-security.kubernetes.io/enforce": "restricted",
+        "pod-security.kubernetes.io/enforce-version": "latest",
+      },
+      "name": "lab-abcdefghijklmnop",
+    },
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "ResourceQuota",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/managed-by": "labforge",
+        "labforge.io/lab-id": "abcdefghijklmnop",
+      },
+      "name": "lab-quota",
+      "namespace": "lab-abcdefghijklmnop",
+    },
+    "spec": {
+      "hard": {
+        "limits.cpu": "500m",
+        "limits.ephemeral-storage": "512Mi",
+        "limits.memory": "512Mi",
+        "pods": "2",
+        "requests.cpu": "250m",
+        "requests.ephemeral-storage": "256Mi",
+        "requests.memory": "256Mi",
+      },
+    },
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "LimitRange",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/managed-by": "labforge",
+        "labforge.io/lab-id": "abcdefghijklmnop",
+      },
+      "name": "lab-limits",
+      "namespace": "lab-abcdefghijklmnop",
+    },
+    "spec": {
+      "limits": [
+        {
+          "_default": {
+            "cpu": "500m",
+            "ephemeral-storage": "512Mi",
+            "memory": "512Mi",
+          },
+          "defaultRequest": {
+            "cpu": "250m",
+            "ephemeral-storage": "256Mi",
+            "memory": "256Mi",
+          },
+          "max": {
+            "cpu": "500m",
+            "memory": "512Mi",
+          },
+          "type": "Container",
+        },
+      ],
+    },
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/managed-by": "labforge",
+        "labforge.io/lab-id": "abcdefghijklmnop",
+      },
+      "name": "lab-isolation",
+      "namespace": "lab-abcdefghijklmnop",
+    },
+    "spec": {
+      "egress": [
+        {
+          "ports": [
+            {
+              "port": 53,
+              "protocol": "UDP",
+            },
+            {
+              "port": 53,
+              "protocol": "TCP",
+            },
+          ],
+          "to": [
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "kube-system",
+                },
+              },
+              "podSelector": {
+                "matchLabels": {
+                  "k8s-app": "kube-dns",
+                },
+              },
+            },
+          ],
+        },
+        {
+          "to": [
+            {
+              "ipBlock": {
+                "cidr": "0.0.0.0/0",
+                "except": [
+                  "10.42.0.0/16",
+                  "10.43.0.0/16",
+                  "169.254.169.254/32",
+                ],
+              },
+            },
+          ],
+        },
+      ],
+      "ingress": [
+        {
+          "_from": [
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "kube-system",
+                },
+              },
+            },
+          ],
+          "ports": [
+            {
+              "port": 7681,
+              "protocol": "TCP",
+            },
+          ],
+        },
+      ],
+      "podSelector": {},
+      "policyTypes": [
+        "Ingress",
+        "Egress",
+      ],
+    },
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Pod",
+    "metadata": {
+      "annotations": {
+        "labforge.io/expires-at": "1700002700",
+        "labforge.io/owner": "user-1",
+      },
+      "labels": {
+        "app.kubernetes.io/managed-by": "labforge",
+        "labforge.io/lab-id": "abcdefghijklmnop",
+      },
+      "name": "lab",
+      "namespace": "lab-abcdefghijklmnop",
+    },
+    "spec": {
+      "activeDeadlineSeconds": 2760,
+      "automountServiceAccountToken": false,
+      "containers": [
+        {
+          "env": [
+            {
+              "name": "LAB_ID",
+              "value": "abcdefghijklmnop",
+            },
+          ],
+          "image": "labforge-lab:dev",
+          "imagePullPolicy": "IfNotPresent",
+          "name": "terminal",
+          "ports": [
+            {
+              "containerPort": 7681,
+              "name": "ttyd",
+            },
+          ],
+          "readinessProbe": {
+            "initialDelaySeconds": 1,
+            "periodSeconds": 2,
+            "tcpSocket": {
+              "port": 7681,
+            },
+          },
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "ephemeral-storage": "512Mi",
+              "memory": "512Mi",
+            },
+            "requests": {
+              "cpu": "250m",
+              "ephemeral-storage": "256Mi",
+              "memory": "256Mi",
+            },
+          },
+          "securityContext": {
+            "allowPrivilegeEscalation": false,
+            "capabilities": {
+              "drop": [
+                "ALL",
+              ],
+            },
+            "readOnlyRootFilesystem": true,
+            "runAsNonRoot": true,
+            "runAsUser": 1000,
+            "seccompProfile": {
+              "type": "RuntimeDefault",
+            },
+          },
+          "volumeMounts": [
+            {
+              "mountPath": "/home/lab",
+              "name": "home",
+            },
+            {
+              "mountPath": "/tmp",
+              "name": "tmp",
+            },
+            {
+              "mountPath": "/etc/labforge",
+              "name": "labinfo",
+              "readOnly": true,
+            },
+          ],
+        },
+      ],
+      "enableServiceLinks": false,
+      "restartPolicy": "Never",
+      "securityContext": {
+        "fsGroup": 1000,
+        "runAsGroup": 1000,
+        "runAsNonRoot": true,
+        "runAsUser": 1000,
+        "seccompProfile": {
+          "type": "RuntimeDefault",
+        },
+      },
+      "volumes": [
+        {
+          "emptyDir": {},
+          "name": "home",
+        },
+        {
+          "emptyDir": {},
+          "name": "tmp",
+        },
+        {
+          "downwardAPI": {
+            "items": [
+              {
+                "fieldRef": {
+                  "fieldPath": "metadata.annotations['labforge.io/expires-at']",
+                },
+                "path": "expires-at",
+              },
+            ],
+          },
+          "name": "labinfo",
+        },
+      ],
+    },
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/managed-by": "labforge",
+        "labforge.io/lab-id": "abcdefghijklmnop",
+      },
+      "name": "lab",
+      "namespace": "lab-abcdefghijklmnop",
+    },
+    "spec": {
+      "ports": [
+        {
+          "name": "ttyd",
+          "port": 7681,
+          "targetPort": 7681,
+        },
+      ],
+      "selector": {
+        "labforge.io/lab-id": "abcdefghijklmnop",
+      },
+    },
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "Ingress",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/managed-by": "labforge",
+        "labforge.io/lab-id": "abcdefghijklmnop",
+      },
+      "name": "lab",
+      "namespace": "lab-abcdefghijklmnop",
+    },
+    "spec": {
+      "ingressClassName": "traefik",
+      "rules": [
+        {
+          "http": {
+            "paths": [
+              {
+                "backend": {
+                  "service": {
+                    "name": "lab",
+                    "port": {
+                      "number": 7681,
+                    },
+                  },
+                },
+                "path": "/lab/abcdefghijklmnop",
+                "pathType": "Prefix",
+              },
+            ],
+          },
+        },
+      ],
+    },
+  },
+]
+`;

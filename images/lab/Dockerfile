@@ -40,8 +40,8 @@ WORKDIR /home/lab
 # ttyd serves the terminal on 7681.
 EXPOSE 7681
 
-# LAB_ID (base path) and EXPIRES_AT (MOTD) are injected by the pod spec.
-ENV LAB_ID="" \
-    EXPIRES_AT=""
+# LAB_ID (ttyd base path) is injected by the pod spec. Expiry for the MOTD is
+# read from the downward API file /etc/labforge/expires-at.
+ENV LAB_ID=""
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -130,7 +130,12 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: labforge
     labforge.io/lab-id: demo0lab0one
+  annotations:
+    # Mirrored from the namespace so the downward API volume can expose it.
+    labforge.io/expires-at: "4102444800"
 spec:
+  # Bare pod: if it exits, the lab is over. Never restart it.
+  restartPolicy: Never
   # Don't mount the SA token or inject SVC_* env — the lab needs neither and
   # both are attack surface.
   automountServiceAccountToken: false
@@ -150,10 +155,8 @@ spec:
       ports:
         - containerPort: 7681
       env:
-        - name: LAB_ID
+        - name: LAB_ID # ttyd base path: /lab/<LAB_ID>
           value: demo0lab0one
-        - name: EXPIRES_AT
-          value: "4102444800"
       # Container-level security: drop all caps, no escalation, read-only root.
       securityContext:
         allowPrivilegeEscalation: false
@@ -184,11 +187,23 @@ spec:
           mountPath: /home/lab
         - name: tmp
           mountPath: /tmp
+        - name: labinfo
+          mountPath: /etc/labforge
+          readOnly: true
   volumes:
     - name: home
       emptyDir: {}
     - name: tmp
       emptyDir: {}
+    # Downward API: the expires-at annotation as a file the MOTD reads.
+    # Unlike env vars, this file updates when the annotation is patched, so a
+    # warm lab claimed after start still shows the right expiry.
+    - name: labinfo
+      downwardAPI:
+        items:
+          - path: expires-at
+            fieldRef:
+              fieldPath: metadata.annotations['labforge.io/expires-at']
 ---
 apiVersion: v1
 kind: Service
