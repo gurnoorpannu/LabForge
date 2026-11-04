@@ -1,0 +1,14 @@
+{
+  "name": "@labforge/pool-controller",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc --build",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@labforge/shared": "*"
+  }
+}

@@ -1,0 +1,52 @@
+# --- Secrets: never commit these ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+kubeconfig
+*.kubeconfig
+.kube/
+oci_api_key*
+*_rsa
+*_rsa.pub
+*.tfvars
+!*.tfvars.example
+discord_webhook*
+oauth_client_secret*
+
+# --- Terraform ---
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+.terraformrc
+terraform.rc
+
+# --- Ansible ---
+infra/ansible/inventory.ini
+infra/ansible/*.retry
+
+# --- Node ---
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.npm/
+npm-debug.log*
+
+# --- OS / editor ---
+.DS_Store
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# --- Misc ---
+*.log
+tmp/

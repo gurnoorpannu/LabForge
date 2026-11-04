@@ -1,0 +1,31 @@
+{
+  "name": "labforge",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Self-service platform for temporary, isolated browser Linux terminals on Kubernetes.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "services/shared",
+    "services/api",
+    "services/pool-controller",
+    "services/reaper"
+  ],
+  "scripts": {
+    "typecheck": "tsc --build",
+    "lint": "eslint .",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.2",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0",
+    "vitest": "^2.1.8"
+  }
+}
