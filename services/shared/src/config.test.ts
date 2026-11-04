@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadConfig } from "./config.js";
 import { LAB_ID_RE, labNamespace, newLabId } from "./ids.js";
 
-const base = { DATABASE_URL: "postgres://x" };
+const base = { DATABASE_URL: "postgres://x", NODE_CIDR: "172.28.0.0/16" };
 
 describe("loadConfig", () => {
   it("applies the spec defaults", () => {
@@ -27,7 +27,12 @@ describe("loadConfig", () => {
   });
 
   it("requires DATABASE_URL", () => {
-    expect(() => loadConfig({})).toThrow(/DATABASE_URL/);
+    expect(() => loadConfig({ NODE_CIDR: base.NODE_CIDR })).toThrow(/DATABASE_URL/);
+  });
+
+  // Without it, labs can reach the API server: its ClusterIP is DNAT'd to a node IP.
+  it("requires NODE_CIDR (no silent default)", () => {
+    expect(() => loadConfig({ DATABASE_URL: base.DATABASE_URL })).toThrow(/NODE_CIDR/);
   });
 
   it("refuses fake dev auth in production", () => {

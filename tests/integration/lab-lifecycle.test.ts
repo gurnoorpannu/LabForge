@@ -35,6 +35,7 @@ describe.skipIf(!enabled)("lab lifecycle on k3d", () => {
   beforeAll(async () => {
     const config = loadConfig({
       DATABASE_URL: "postgres://labforge:labforge@localhost:5432/labforge",
+      NODE_CIDR: "172.28.0.0/16",
       ...process.env,
       NODE_ENV: "test",
       DEV_FAKE_AUTH: "true",

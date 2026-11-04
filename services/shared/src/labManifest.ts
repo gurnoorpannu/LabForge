@@ -151,8 +151,9 @@ function networkPolicy(cfg: Config, p: LabParams): V1NetworkPolicy {
         {
           ipBlock: {
             cidr: "0.0.0.0/0",
-            // Internet yes; cluster internals and cloud metadata no.
-            except: [n.podCidr, n.serviceCidr, ...(n.nodeCidr ? [n.nodeCidr] : []), n.metadataCidr],
+            // Internet yes; cluster internals and cloud metadata no. The node CIDR
+            // matters most: it is where the API server really lives post-DNAT.
+            except: [n.podCidr, n.serviceCidr, n.nodeCidr, n.metadataCidr],
           },
         },
       ],
@@ -210,6 +211,9 @@ function pod(cfg: Config, p: LabParams): V1Pod {
         runAsGroup: 1000,
         fsGroup: 1000,
         seccompProfile: { type: "RuntimeDefault" },
+        // Unprivileged ICMP sockets for the lab user, so `ping` works with every
+        // capability dropped. A "safe" sysctl: allowed by the restricted profile.
+        sysctls: [{ name: "net.ipv4.ping_group_range", value: "1000 1000" }],
       },
       containers: [
         {

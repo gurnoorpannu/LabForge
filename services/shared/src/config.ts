@@ -49,7 +49,10 @@ const envSchema = z
     LAB_INTERNET_EGRESS: z.stringbool().default(true),
     POD_CIDR: cidr.default("10.42.0.0/16"),
     SERVICE_CIDR: cidr.default("10.43.0.0/16"),
-    NODE_CIDR: cidr.optional(), // VCN/node subnet in prod; unset locally
+    // Required, no default: kube-proxy rewrites the API server's ClusterIP to a
+    // node IP *before* NetworkPolicy runs, so excluding only SERVICE_CIDR does not
+    // block it. Prod: the VCN subnet. Local: the k3d network (`make dev-up` pins it).
+    NODE_CIDR: cidr,
     METADATA_CIDR: cidr.default("169.254.169.254/32"),
 
     // Phase 2 only: trust an `x-dev-user` header as the logged-in user.

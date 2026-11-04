@@ -120,6 +120,10 @@ spec:
             except:
               - 10.42.0.0/16 # pod CIDR
               - 10.43.0.0/16 # service CIDR
+              # Node network (k3d subnet pinned by `make dev-up`). Essential: the
+              # API server's ClusterIP 10.43.0.1 is DNAT'd to a node IP *before*
+              # NetworkPolicy is evaluated, so the service CIDR alone doesn't block it.
+              - 172.28.0.0/16
               - 169.254.169.254/32 # cloud metadata endpoint
 ---
 apiVersion: v1
@@ -148,6 +152,11 @@ spec:
     fsGroup: 1000
     seccompProfile:
       type: RuntimeDefault
+    # Unprivileged ICMP for the lab user so `ping` works with all caps dropped.
+    # A "safe" sysctl, permitted under the restricted profile.
+    sysctls:
+      - name: net.ipv4.ping_group_range
+        value: "1000 1000"
   containers:
     - name: terminal
       image: labforge-lab:dev

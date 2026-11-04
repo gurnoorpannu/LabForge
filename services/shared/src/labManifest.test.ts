@@ -6,7 +6,7 @@ import { buildLab, EXPIRY_GRACE_SECONDS } from "./labManifest.js";
 const NOW = 1_700_000_000;
 const TTL = 45 * 60;
 const cfg = (env: Record<string, string> = {}) =>
-  loadConfig({ NODE_ENV: "test", DATABASE_URL: "postgres://x", ...env });
+  loadConfig({ NODE_ENV: "test", DATABASE_URL: "postgres://x", NODE_CIDR: "172.28.0.0/16", ...env });
 
 const claimed = (env?: Record<string, string>) =>
   buildLab(cfg(env), {
@@ -61,6 +61,10 @@ describe("buildLab", () => {
       seccompProfile: { type: "RuntimeDefault" },
     });
     expect(c.volumeMounts?.map((m) => m.mountPath)).toEqual(["/home/lab", "/tmp", "/etc/labforge"]);
+    // ping via unprivileged ICMP sockets for the lab group only, not CAP_NET_RAW
+    expect(spec.securityContext?.sysctls).toEqual([
+      { name: "net.ipv4.ping_group_range", value: "1000 1000" },
+    ]);
   });
 
   it("sets activeDeadlineSeconds to the remaining TTL plus grace", () => {

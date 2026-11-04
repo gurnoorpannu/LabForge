@@ -53,6 +53,7 @@ async function setup(env: Record<string, string> = {}) {
   const config = loadConfig({
     NODE_ENV: "test",
     DATABASE_URL: "postgres://x",
+    NODE_CIDR: "172.28.0.0/16",
     DEV_FAKE_AUTH: "true",
     PUBLIC_BASE_URL: "https://labs.example.test",
     ...env,

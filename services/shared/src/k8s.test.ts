@@ -68,7 +68,7 @@ describe("createK8s against a fake API server", () => {
       currentContext: "fake",
     });
 
-    const cfg = loadConfig({ NODE_ENV: "test", DATABASE_URL: "postgres://x" });
+    const cfg = loadConfig({ NODE_ENV: "test", DATABASE_URL: "postgres://x", NODE_CIDR: "172.28.0.0/16" });
     const objs = buildLab(cfg, {
       labId: "abcdefghijklmnop",
       state: "claimed",
