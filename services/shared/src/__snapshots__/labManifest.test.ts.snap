@@ -309,9 +309,33 @@ exports[`buildLab > matches the snapshot (review diffs to this file carefully) 1
     },
   },
   {
+    "apiVersion": "traefik.io/v1alpha1",
+    "kind": "Middleware",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/managed-by": "labforge",
+        "labforge.io/lab-id": "abcdefghijklmnop",
+      },
+      "name": "lab-auth",
+      "namespace": "lab-abcdefghijklmnop",
+    },
+    "spec": {
+      "forwardAuth": {
+        "address": "http://host.k3d.internal:3000/auth/verify?lab=abcdefghijklmnop",
+        "authRequestHeaders": [
+          "Cookie",
+        ],
+        "trustForwardHeader": false,
+      },
+    },
+  },
+  {
     "apiVersion": "networking.k8s.io/v1",
     "kind": "Ingress",
     "metadata": {
+      "annotations": {
+        "traefik.ingress.kubernetes.io/router.middlewares": "lab-abcdefghijklmnop-lab-auth@kubernetescrd",
+      },
       "labels": {
         "app.kubernetes.io/managed-by": "labforge",
         "labforge.io/lab-id": "abcdefghijklmnop",

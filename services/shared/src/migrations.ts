@@ -42,4 +42,18 @@ export const MIGRATIONS: ReadonlyArray<{ id: string; sql: string }> = [
       );
     `,
   },
+  {
+    id: "002_sessions",
+    sql: `
+      -- The cookie carries a random token; only its SHA-256 is stored, so a
+      -- database leak does not hand out live sessions.
+      CREATE TABLE sessions (
+        token_hash  TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at  TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX sessions_expires_at ON sessions (expires_at);
+    `,
+  },
 ];

@@ -6,7 +6,7 @@ import { buildLab, EXPIRY_GRACE_SECONDS } from "./labManifest.js";
 const NOW = 1_700_000_000;
 const TTL = 45 * 60;
 const cfg = (env: Record<string, string> = {}) =>
-  loadConfig({ NODE_ENV: "test", DATABASE_URL: "postgres://x", NODE_CIDR: "172.28.0.0/16", ...env });
+  loadConfig({ NODE_ENV: "test", DATABASE_URL: "postgres://x", NODE_CIDR: "172.28.0.0/16", SESSION_SECRET: "x".repeat(32), ...env });
 
 const claimed = (env?: Record<string, string>) =>
   buildLab(cfg(env), {
@@ -25,7 +25,7 @@ describe("buildLab", () => {
     expect(claimed()).toMatchSnapshot();
   });
 
-  it("emits objects in apply order, namespace first, ingress last", () => {
+  it("emits objects in apply order: namespace first, auth middleware before ingress", () => {
     expect(claimed().map((o) => o.kind)).toEqual([
       "Namespace",
       "ResourceQuota",
@@ -33,8 +33,27 @@ describe("buildLab", () => {
       "NetworkPolicy",
       "Pod",
       "Service",
+      "Middleware",
       "Ingress",
     ]);
+  });
+
+  it("guards the ingress with a ForwardAuth bound to this lab's id", () => {
+    const mw = byKind<{ apiVersion: string; spec: { forwardAuth: Record<string, unknown> } }>(
+      claimed({ AUTH_VERIFY_URL: "http://api.labforge.svc:3000/auth/verify" }),
+      "Middleware",
+    );
+    expect(mw.apiVersion).toBe("traefik.io/v1alpha1");
+    expect(mw.spec.forwardAuth).toEqual({
+      // lab id from cluster config, not from the client's request path
+      address: "http://api.labforge.svc:3000/auth/verify?lab=abcdefghijklmnop",
+      trustForwardHeader: false,
+      authRequestHeaders: ["Cookie"],
+    });
+    const ing = byKind<V1Ingress>(claimed(), "Ingress");
+    expect(ing.metadata?.annotations?.["traefik.ingress.kubernetes.io/router.middlewares"]).toBe(
+      "lab-abcdefghijklmnop-lab-auth@kubernetescrd",
+    );
   });
 
   it("enforces the restricted Pod Security profile on the namespace", () => {
@@ -106,6 +125,7 @@ describe("buildLab", () => {
   it("builds an unreachable warm lab: no ingress, no owner, no deadline", () => {
     const objs = buildLab(cfg(), { labId: "abcdefghijklmnop", state: "ready", now: NOW });
     expect(objs.map((o) => o.kind)).not.toContain("Ingress");
+    expect(objs.map((o) => o.kind)).not.toContain("Middleware");
     expect(byKind<V1Namespace>(objs, "Namespace").metadata?.annotations).toEqual({});
     expect(byKind<V1Pod>(objs, "Pod").spec?.activeDeadlineSeconds).toBeUndefined();
   });

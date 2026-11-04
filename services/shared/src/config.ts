@@ -22,6 +22,22 @@ const envSchema = z
 
     // Where users reach labs, e.g. https://labs.gurnoor.online (no trailing slash).
     PUBLIC_BASE_URL: z.url().default("http://localhost:8080"),
+    // Where users reach the UI/API. Prod: same as PUBLIC_BASE_URL (one host).
+    // Local: http://localhost:3000, since the API runs on the Mac, not in k3d.
+    APP_BASE_URL: z.url().optional(),
+    // Address Traefik's ForwardAuth calls. Local default: the API on the Mac, via
+    // the host alias k3d injects into cluster DNS. Unreachable = access denied.
+    AUTH_VERIFY_URL: z.url().default("http://host.k3d.internal:3000/auth/verify"),
+
+    // Signs session cookies. 32+ chars; generate with `openssl rand -hex 32`.
+    SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters"),
+    SESSION_TTL: duration.default(12 * 3600),
+
+    // Google OIDC. Optional so tests and local dev run without a Google client;
+    // /auth/login answers 503 until both are set.
+    OIDC_ISSUER: z.url().default("https://accounts.google.com"),
+    OIDC_CLIENT_ID: z.string().min(1).optional(),
+    OIDC_CLIENT_SECRET: z.string().min(1).optional(),
     // Host rule on lab Ingresses. Unset locally (match any host).
     INGRESS_HOST: z.string().min(1).optional(),
     INGRESS_CLASS: z.string().default("traefik"),
@@ -55,22 +71,31 @@ const envSchema = z
     NODE_CIDR: cidr,
     METADATA_CIDR: cidr.default("169.254.169.254/32"),
 
-    // Phase 2 only: trust an `x-dev-user` header as the logged-in user.
-    DEV_FAKE_AUTH: z.stringbool().default(false),
     RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(5),
   })
-  .refine((c) => !(c.DEV_FAKE_AUTH && c.NODE_ENV === "production"), {
-    message: "DEV_FAKE_AUTH must not be enabled when NODE_ENV=production",
-    path: ["DEV_FAKE_AUTH"],
-  })
-  .transform((c) => ({
+  .transform((c) => {
+    const appBaseUrl = (c.APP_BASE_URL ?? c.PUBLIC_BASE_URL).replace(/\/+$/, "");
+    return {
     env: c.NODE_ENV,
     logLevel: c.LOG_LEVEL,
     port: c.PORT,
     publicBaseUrl: c.PUBLIC_BASE_URL.replace(/\/+$/, ""),
+    appBaseUrl,
+    authVerifyUrl: c.AUTH_VERIFY_URL,
     databaseUrl: c.DATABASE_URL,
-    devFakeAuth: c.DEV_FAKE_AUTH,
     rateLimitPerMin: c.RATE_LIMIT_PER_MIN,
+    session: {
+      secret: c.SESSION_SECRET,
+      ttlSeconds: c.SESSION_TTL,
+      // Secure cookies need https; plain-http localhost dev can't set them.
+      secureCookie: appBaseUrl.startsWith("https://"),
+    },
+    oidc: {
+      issuer: c.OIDC_ISSUER,
+      clientId: c.OIDC_CLIENT_ID,
+      clientSecret: c.OIDC_CLIENT_SECRET,
+      redirectUri: `${appBaseUrl}/auth/callback`,
+    },
     ingress: {
       host: c.INGRESS_HOST,
       className: c.INGRESS_CLASS,
@@ -103,7 +128,8 @@ const envSchema = z
       nodeCidr: c.NODE_CIDR,
       metadataCidr: c.METADATA_CIDR,
     },
-  }));
+    };
+  });
 
 export type Config = z.output<typeof envSchema>;
 

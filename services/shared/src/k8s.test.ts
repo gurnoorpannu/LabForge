@@ -19,6 +19,7 @@ const RESOURCES: Record<string, Array<{ name: string; kind: string; namespaced: 
     { name: "networkpolicies", kind: "NetworkPolicy", namespaced: true },
     { name: "ingresses", kind: "Ingress", namespaced: true },
   ],
+  "/apis/traefik.io/v1alpha1": [{ name: "middlewares", kind: "Middleware", namespaced: true }],
 };
 
 /**
@@ -68,7 +69,7 @@ describe("createK8s against a fake API server", () => {
       currentContext: "fake",
     });
 
-    const cfg = loadConfig({ NODE_ENV: "test", DATABASE_URL: "postgres://x", NODE_CIDR: "172.28.0.0/16" });
+    const cfg = loadConfig({ NODE_ENV: "test", DATABASE_URL: "postgres://x", NODE_CIDR: "172.28.0.0/16", SESSION_SECRET: "x".repeat(32) });
     const objs = buildLab(cfg, {
       labId: "abcdefghijklmnop",
       state: "claimed",
@@ -86,7 +87,17 @@ describe("createK8s against a fake API server", () => {
   it("creates the namespace first, then the namespaced objects inside it", () => {
     expect(posts[0]?.url).toBe("/api/v1/namespaces");
     expect(posts.slice(1).every((p) => p.url.includes("/namespaces/lab-abcdefghijklmnop/"))).toBe(true);
-    expect(posts).toHaveLength(7);
+    expect(posts).toHaveLength(8);
+  });
+
+  it("creates the Traefik Middleware (a CRD the client has no model for) before the Ingress", () => {
+    const urls = posts.map((p) => p.url);
+    const mw = urls.findIndex((u) => u.startsWith("/apis/traefik.io/v1alpha1/") && u.endsWith("/middlewares"));
+    const ing = urls.findIndex((u) => u.endsWith("/ingresses"));
+    expect(mw).toBeGreaterThan(-1);
+    expect(mw).toBeLessThan(ing);
+    const body = bodyFor("middlewares") as { spec: { forwardAuth: { address: string } } };
+    expect(body.spec.forwardAuth.address).toContain("?lab=abcdefghijklmnop");
   });
 
   it("sends NetworkPolicy ingress as `from`, never `_from`", () => {

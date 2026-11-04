@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { loadConfig } from "./config.js";
 import { LAB_ID_RE, labNamespace, newLabId } from "./ids.js";
 
-const base = { DATABASE_URL: "postgres://x", NODE_CIDR: "172.28.0.0/16" };
+const base = {
+  DATABASE_URL: "postgres://x",
+  NODE_CIDR: "172.28.0.0/16",
+  SESSION_SECRET: "x".repeat(32),
+};
 
 describe("loadConfig", () => {
   it("applies the spec defaults", () => {
@@ -11,7 +15,23 @@ describe("loadConfig", () => {
     expect(c.lab.poolSize).toBe(3);
     expect(c.lab.maxConcurrent).toBe(10);
     expect(c.network.internetEgress).toBe(true);
-    expect(c.devFakeAuth).toBe(false);
+    expect(c.session.ttlSeconds).toBe(12 * 3600);
+    expect(c.oidc.issuer).toBe("https://accounts.google.com");
+  });
+
+  it("rejects a short session secret", () => {
+    expect(() => loadConfig({ ...base, SESSION_SECRET: "short" })).toThrow(/SESSION_SECRET/);
+  });
+
+  it("serves the app from the public URL unless APP_BASE_URL is set", () => {
+    const prod = loadConfig({ ...base, PUBLIC_BASE_URL: "https://labs.gurnoor.online" });
+    expect(prod.appBaseUrl).toBe("https://labs.gurnoor.online");
+    expect(prod.oidc.redirectUri).toBe("https://labs.gurnoor.online/auth/callback");
+    expect(prod.session.secureCookie).toBe(true);
+
+    const local = loadConfig({ ...base, APP_BASE_URL: "http://localhost:3000" });
+    expect(local.oidc.redirectUri).toBe("http://localhost:3000/auth/callback");
+    expect(local.session.secureCookie).toBe(false); // browsers won't store Secure cookies over http
   });
 
   it.each([
@@ -27,18 +47,12 @@ describe("loadConfig", () => {
   });
 
   it("requires DATABASE_URL", () => {
-    expect(() => loadConfig({ NODE_CIDR: base.NODE_CIDR })).toThrow(/DATABASE_URL/);
+    expect(() => loadConfig({ ...base, DATABASE_URL: undefined })).toThrow(/DATABASE_URL/);
   });
 
   // Without it, labs can reach the API server: its ClusterIP is DNAT'd to a node IP.
   it("requires NODE_CIDR (no silent default)", () => {
-    expect(() => loadConfig({ DATABASE_URL: base.DATABASE_URL })).toThrow(/NODE_CIDR/);
-  });
-
-  it("refuses fake dev auth in production", () => {
-    expect(() =>
-      loadConfig({ ...base, NODE_ENV: "production", DEV_FAKE_AUTH: "true" }),
-    ).toThrow(/DEV_FAKE_AUTH/);
+    expect(() => loadConfig({ ...base, NODE_CIDR: undefined })).toThrow(/NODE_CIDR/);
   });
 
   it("parses booleans and strips a trailing slash from the base URL", () => {

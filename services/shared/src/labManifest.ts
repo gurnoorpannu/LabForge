@@ -57,8 +57,57 @@ export function buildLab(cfg: Config, p: LabParams): KubernetesObject[] {
     pod(cfg, p),
     service(p),
   ];
-  if (p.state === "claimed") objects.push(buildLabIngress(cfg, p.labId));
+  if (p.state === "claimed") objects.push(...buildLabRoute(cfg, p.labId));
   return objects;
+}
+
+/**
+ * What makes a lab reachable: the auth Middleware, then the Ingress that uses it.
+ * Created only on claim. Middleware goes first, so the route never exists
+ * without its guard (an Ingress naming a missing Middleware is refused by
+ * Traefik anyway: fail closed).
+ */
+export function buildLabRoute(cfg: Config, labId: string): KubernetesObject[] {
+  return [buildLabAuthMiddleware(cfg, labId), buildLabIngress(cfg, labId)];
+}
+
+export const AUTH_MIDDLEWARE_NAME = "lab-auth";
+
+/** Traefik CRD; client-node has no model for it. API group checked against Traefik 3.6. */
+interface TraefikMiddleware extends KubernetesObject {
+  spec: {
+    forwardAuth: {
+      address: string;
+      trustForwardHeader: boolean;
+      authRequestHeaders: string[];
+    };
+  };
+}
+
+export function buildLabAuthMiddleware(cfg: Config, labId: string): TraefikMiddleware {
+  const address = new URL(cfg.authVerifyUrl);
+  // The lab id is baked into this lab's own Middleware, so /auth/verify never has
+  // to trust the client-controlled request path (X-Forwarded-Uri) to know which
+  // lab is being opened. That rules out path tricks like /lab/<mine>/../<yours>.
+  address.searchParams.set("lab", labId);
+  return {
+    apiVersion: "traefik.io/v1alpha1",
+    kind: "Middleware",
+    metadata: {
+      name: AUTH_MIDDLEWARE_NAME,
+      namespace: labNamespace(labId),
+      labels: { [LABEL.managedBy]: MANAGED_BY, [LABEL.labId]: labId },
+    },
+    spec: {
+      forwardAuth: {
+        address: address.toString(),
+        // Don't accept X-Forwarded-* from the client; Traefik sets its own.
+        trustForwardHeader: false,
+        // The session cookie is all /auth/verify needs; forward nothing else.
+        authRequestHeaders: ["Cookie"],
+      },
+    },
+  };
 }
 
 function labels(p: LabParams): Record<string, string> {
@@ -287,6 +336,10 @@ export function buildLabIngress(cfg: Config, labId: string): V1Ingress {
       name: LAB_POD_NAME,
       namespace: labNamespace(labId),
       labels: { [LABEL.managedBy]: MANAGED_BY, [LABEL.labId]: labId },
+      annotations: {
+        // <namespace>-<name>@kubernetescrd: the Middleware in this lab's namespace.
+        "traefik.ingress.kubernetes.io/router.middlewares": `${labNamespace(labId)}-${AUTH_MIDDLEWARE_NAME}@kubernetescrd`,
+      },
     },
     spec: {
       ingressClassName: cfg.ingress.className,
