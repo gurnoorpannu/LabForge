@@ -1,4 +1,4 @@
-# Local dev (Phases 1–2)
+# Local dev (Phases 1–3)
 
 Hand-written example lab so each Kubernetes object is understood before the API generates it in code,
 plus the API running on your Mac against a local k3d cluster.
@@ -26,23 +26,66 @@ make lab-example-down    # remove the lab namespace
 make dev-down            # delete the cluster
 ```
 
-## Run the API (Phase 2)
+## Run the API (Phases 2–3)
 
-The API runs on your Mac against the k3d cluster (your kubeconfig) and a Docker Postgres.
+The API runs on your Mac (`:3000`) against the k3d cluster (your kubeconfig) and a Docker Postgres.
+Traefik inside k3d reaches it for ForwardAuth through `host.k3d.internal:3000`.
 
 ```bash
 make dev-db                                       # Postgres 16 on :5432 (or DB_PORT=5433, see below)
-cp services/api/.env.example services/api/.env    # DEV_FAKE_AUTH=true locally
-make api-run                                      # http://localhost:3000
-
-curl -s -XPOST localhost:3000/api/labs -H 'x-dev-user: alice'   # start a cold lab
-curl -s localhost:3000/api/labs/me     -H 'x-dev-user: alice'   # current lab
-curl -s -XDELETE localhost:3000/api/labs/me -H 'x-dev-user: alice'
-make test-integration                             # real k3d + Postgres tests
+cp services/api/.env.example services/api/.env    # then set SESSION_SECRET=$(openssl rand -hex 32)
+make api-run                                      # UI at http://localhost:3000
 ```
 
-`x-dev-user` is trusted only when `DEV_FAKE_AUTH=true`, and config refuses to start with it
-when `NODE_ENV=production`. Google login replaces it in Phase 3.
+Without a Google client, mint a session instead of logging in (also what tests and k6 use):
+
+```bash
+COOKIE=$(make -s mint-session LAB_USER=alice)
+curl -s -XPOST localhost:3000/api/labs -H "cookie: $COOKIE"        # start a lab -> url
+curl -s localhost:8080/lab/<labId>/ -H "cookie: $COOKIE" -o /dev/null -w '%{http_code}\n'   # 200
+curl -s localhost:8080/lab/<labId>/ -o /dev/null -w '%{http_code}\n'                        # 401
+curl -s -XDELETE localhost:3000/api/labs/me -H "cookie: $COOKIE"
+make test-integration                             # real k3d + Traefik + Postgres tests
+```
+
+The Phase 2 `x-dev-user` header is gone: ForwardAuth forwards browser headers, so any
+header-trusting shortcut would be a way to fake identity.
+
+## Google login (Phase 3)
+
+1. <https://console.cloud.google.com> → create/select a project → **APIs & Services → OAuth consent
+   screen**: External, app name "LabForge", your email; while in *Testing*, add yourself under
+   **Test users**.
+2. **Credentials → Create credentials → OAuth client ID → Web application**. Authorized redirect URIs:
+   - `http://localhost:3000/auth/callback` (local)
+   - `https://labs.gurnoor.online/auth/callback` (prod)
+3. Put the client id and secret in `services/api/.env` (`OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`),
+   restart `make api-run`, open <http://localhost:3000> → **Log in with Google**.
+
+In production they live in a Kubernetes Secret, created by hand (never committed). `read -s` keeps
+the values out of your shell history:
+
+```bash
+read -s OIDC_CLIENT_SECRET   # paste, Enter
+kubectl -n labforge create secret generic labforge-api \
+  --from-literal=SESSION_SECRET="$(openssl rand -hex 32)" \
+  --from-literal=OIDC_CLIENT_ID="<client-id>.apps.googleusercontent.com" \
+  --from-literal=OIDC_CLIENT_SECRET="$OIDC_CLIENT_SECRET"
+unset OIDC_CLIENT_SECRET
+```
+
+How login works: authorization code flow with **PKCE (S256)**, `state` (login CSRF) and `nonce`
+(ID-token replay), held for 10 minutes in a signed `lf_oidc` cookie scoped to `/auth`. On success
+the API stores a session (only the SHA-256 of a 256-bit token) and sets `lf_session`: signed,
+`HttpOnly`, `SameSite=Lax`, `Secure` on https, host-only (no `Domain` attribute, so it never leaks
+to subdomains). A verified Google email is required.
+
+How a terminal request is authorised: each lab's Ingress uses its own Traefik `Middleware`
+(`forwardAuth` → `/auth/verify?lab=<id>`). The lab id is baked in when the lab is claimed, so the
+API never parses the client-controlled path; see
+[ADR-0001](../../docs/adr/0001-forwardauth-binds-lab-id.md). `/auth/verify` answers in one indexed
+query: **200** owner of a live lab, **401** no/invalid session, **403** someone else's lab, or an
+expired/ended one.
 
 `rbac.yaml` holds the API's ServiceAccount and least-privilege ClusterRole (used once the API
 runs in-cluster, Phase 7). `make rbac` applies it; check it with
@@ -61,8 +104,9 @@ runs in-cluster, Phase 7). `make rbac` applies it; check it with
 | **Service** | ClusterIP → 7681. |
 | **Ingress** | Traefik routes `/lab/<id>` to the Service, no prefix strip (ttyd owns the path via `-b`). |
 
-The Traefik **ForwardAuth Middleware** (per-lab owner check) is added in Phase 3. Until then labs are open,
-so the terminal path can be proven first.
+Labs created by the API (Phase 3+) also get a Traefik **ForwardAuth Middleware** that the Ingress
+references, so only the lab's owner gets in. This hand-written demo lab deliberately has none: it's
+open, for learning the objects. Don't leave it running anywhere reachable (`make lab-example-down`).
 
 ### Why the node CIDR must be blocked
 
@@ -83,7 +127,25 @@ service CIDR therefore leaves the API server reachable; this was observed on the
 | `CapEff`, `NoNewPrivs`, SA token | `0000000000000000`, `1`, not mounted |
 | DNS, HTTPS to internet, `ping 1.1.1.1` | OK |
 | K8s API `10.43.0.1`, node `:6443`, kubelet `:10250`, `169.254.169.254` | blocked |
-| `make test-integration`: create → Ready → reachable → delete; 20-way reservation races | 4/4 pass |
+| `make test-integration` (Phase 2): create → Ready → reachable → delete; 20-way reservation races | 4/4 pass |
+
+### Phase 3: access through Traefik ForwardAuth (`make test-integration`, 13/13, 3 runs)
+
+| Request to a lab (through real Traefik on :8080) | Result |
+|---|---|
+| Owner's session: page / websocket | `200` / `101` |
+| No session: page / websocket | `401` / `401` |
+| Forged (bad-signature) cookie | `401` |
+| Another user's session: page / websocket | `403` / `403` |
+| Another user + spoofed `X-Forwarded-Uri`/`X-Forwarded-Prefix` naming their own lab | `403` |
+| Another user + `/lab/<theirs>/../<victim>/`, `%2e%2e`, `%2f` path tricks | never `200`/`101` |
+| Owner after the lab's `expires_at` (before the reaper runs) | `403` |
+| Logged-out session (user's other sessions keep working) | `401` (other: `200`) |
+| Owner right after ending the lab, then namespace | denied, then gone |
+
+Manual run in the browser: logged-out page shows "Log in with Google" → with a minted session,
+**Start lab** → **Open terminal** opens bash as `lab` with the expiry banner; clearing the cookie and
+reloading the terminal URL returns `401 login required`.
 
 Commands for the in-pod rows:
 

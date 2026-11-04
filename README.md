@@ -18,7 +18,7 @@ network policy, restricted pod security).
 | 0 | Scaffolding (repo, CI, workspaces) | ✅ done |
 | 1 | Local k3d cluster + lab image | ✅ verified on k3d |
 | 2 | API core (cold start) | ✅ verified on k3d |
-| 3 | Auth + ForwardAuth | ⬜ |
+| 3 | Auth + ForwardAuth | ✅ verified on k3d (Google login pending your OAuth client) |
 | 4 | Isolation hardening | ⬜ |
 | 5 | Lifecycle: reaper, warm pool, claiming | ⬜ |
 | 6 | Observability | ⬜ |
