@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help install typecheck lint test test-integration dev-up dev-down dev-db dev-db-down \
-        rbac api-run lab-image lab-image-import lab-example-up lab-example-down infra-plan
+        rbac api-run mint-session lab-image lab-image-import lab-example-up lab-example-down infra-plan
 
 # --- Local dev config ---
 # (Comments go on their own line: Make keeps the spaces before a trailing `#`
@@ -64,6 +64,12 @@ rbac:
 api-run:
 	npm run typecheck
 	node --env-file=services/api/.env services/api/dist/index.js
+
+## mint-session: Print a session Cookie header for LAB_USER (no Google needed), e.g. make mint-session LAB_USER=alice
+mint-session:
+	@test -n "$(LAB_USER)" || (echo "usage: make mint-session LAB_USER=<id>" && exit 2)
+	@npm run typecheck >/dev/null
+	@node --env-file=services/api/.env services/api/dist/mint-session.js $(LAB_USER)
 
 ## dev-up: Create local k3d cluster (k3s + bundled Traefik), map :$(HTTP_PORT)->:80
 dev-up:
