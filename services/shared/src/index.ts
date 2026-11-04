@@ -1,4 +1,7 @@
-// @labforge/shared — k8s lab builder, db access, metrics, config.
-// Populated in Phase 2. Placeholder export keeps the package buildable.
-
-export const NAME = "@labforge/shared";
+export * from "./config.js";
+export * from "./db.js";
+export * from "./ids.js";
+export * from "./k8s.js";
+export * from "./labManifest.js";
+export * from "./labStore.js";
+export * from "./metrics.js";
