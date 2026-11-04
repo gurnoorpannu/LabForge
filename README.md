@@ -28,12 +28,12 @@ network policy, restricted pod security).
 
 ## Tech stack
 
-k3s (prod) / k3d (local) · Node 20 + TypeScript + Fastify · Postgres 16 · Traefik + cert-manager ·
+k3s (prod) / k3d (local) · Node 24 + TypeScript + Fastify · Postgres 16 · Traefik + cert-manager ·
 Helm + ArgoCD · kube-prometheus-stack · Terraform (OCI) + Ansible · GitHub Actions + GHCR.
 
 ## Quickstart (local)
 
-Requires Node 20+, Docker, and (from Phase 1) `k3d` + `kubectl` + `helm`.
+Requires Node 22.19+ (24 LTS recommended), Docker, and (from Phase 1) `k3d` + `kubectl` + `helm`.
 
 ```bash
 make install      # install JS deps

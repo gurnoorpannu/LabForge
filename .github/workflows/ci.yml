@@ -13,11 +13,13 @@ jobs:
     name: typecheck / lint / test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          # Node 24 LTS. Floor is 22.19: @kubernetes/client-node 2.x pulls in
+          # undici 8, which needs zlib zstd support.
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
