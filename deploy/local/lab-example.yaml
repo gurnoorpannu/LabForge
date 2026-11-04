@@ -1,0 +1,225 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LabForge — hand-written example lab (Phase 1).
+#
+# This is the SAME set of objects the API will later generate in code
+# (services/shared). It is kept by hand here so each object can be read and
+# understood before it is automated.
+#
+# One lab == one namespace `lab-<labId>` containing:
+#   1. Namespace        (labels, annotations, restricted Pod Security Admission)
+#   2. ResourceQuota    (hard caps for the whole namespace)
+#   3. LimitRange       (per-container defaults)
+#   4. NetworkPolicy    (default-deny + narrow allows)
+#   5. Pod              (Ubuntu + ttyd, hardened, read-only root)
+#   6. Service          (ClusterIP -> 7681)
+#   7. Ingress          (path /lab/<labId>, no prefix strip)
+#
+# NOTE: the Traefik ForwardAuth Middleware (owner check) is added in Phase 3.
+# Phase 1 is open so we can prove the terminal works end-to-end first.
+#
+# Apply:   make lab-example-up     (then open http://localhost:8080/lab/demo0lab0one)
+# Remove:  make lab-example-down
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lab-demo0lab0one
+  labels:
+    app.kubernetes.io/managed-by: labforge
+    labforge.io/lab-id: demo0lab0one
+    labforge.io/state: claimed
+    # Pod Security Admission: enforce the strictest built-in profile.
+    # The Pod below is written to satisfy `restricted`; violations are rejected.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+  annotations:
+    # Unix seconds. The reaper (Phase 5/6) deletes the namespace once passed.
+    # Example value is far future so the demo lab does not vanish mid-test.
+    labforge.io/expires-at: "4102444800" # 2100-01-01
+    labforge.io/owner: "dev-user"
+---
+# ResourceQuota: a hard ceiling for everything in the namespace, so one lab
+# can never starve the node. Values match the per-lab defaults in the spec.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: lab-quota
+  namespace: lab-demo0lab0one
+spec:
+  hard:
+    pods: "2"
+    requests.cpu: "250m"
+    requests.memory: 256Mi
+    limits.cpu: "500m"
+    limits.memory: 512Mi
+    requests.ephemeral-storage: 256Mi
+    limits.ephemeral-storage: 512Mi
+---
+# LimitRange: default requests/limits applied to any container that omits them,
+# and a cap on what a single container may ask for.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: lab-limits
+  namespace: lab-demo0lab0one
+spec:
+  limits:
+    - type: Container
+      default: # applied as limits if unset
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 512Mi
+      defaultRequest: # applied as requests if unset
+        cpu: 250m
+        memory: 256Mi
+        ephemeral-storage: 256Mi
+      max:
+        cpu: 500m
+        memory: 512Mi
+---
+# NetworkPolicy: default-deny everything, then open only what a lab needs.
+# (k3s ships a built-in NetworkPolicy controller, so this is enforced on k3d.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: lab-isolation
+  namespace: lab-demo0lab0one
+spec:
+  podSelector: {} # all pods in the namespace
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only Traefik (kube-system) may reach the terminal port 7681.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: TCP
+          port: 7681
+  egress:
+    # DNS to kube-dns (CoreDNS) only.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Internet egress, EXCEPT internal/metadata ranges. Toggleable in Helm later.
+    # CIDRs are k3s/k3d defaults — read from config, not hardcoded, in code.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.42.0.0/16 # pod CIDR
+              - 10.43.0.0/16 # service CIDR
+              - 169.254.169.254/32 # cloud metadata endpoint
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lab
+  namespace: lab-demo0lab0one
+  labels:
+    app.kubernetes.io/managed-by: labforge
+    labforge.io/lab-id: demo0lab0one
+spec:
+  # Don't mount the SA token or inject SVC_* env — the lab needs neither and
+  # both are attack surface.
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  # Pod-level security: non-root, seccomp on (required by `restricted`).
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: terminal
+      image: labforge-lab:dev
+      imagePullPolicy: IfNotPresent # image is imported into k3d, not pulled
+      ports:
+        - containerPort: 7681
+      env:
+        - name: LAB_ID
+          value: demo0lab0one
+        - name: EXPIRES_AT
+          value: "4102444800"
+      # Container-level security: drop all caps, no escalation, read-only root.
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 1000
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
+      resources:
+        requests:
+          cpu: 250m
+          memory: 256Mi
+          ephemeral-storage: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+          ephemeral-storage: 512Mi
+      readinessProbe:
+        tcpSocket:
+          port: 7681
+        initialDelaySeconds: 2
+        periodSeconds: 5
+      # Read-only root FS: writable scratch comes from emptyDir volumes only.
+      volumeMounts:
+        - name: home
+          mountPath: /home/lab
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: home
+      emptyDir: {}
+    - name: tmp
+      emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lab
+  namespace: lab-demo0lab0one
+spec:
+  selector:
+    labforge.io/lab-id: demo0lab0one
+  ports:
+    - name: ttyd
+      port: 7681
+      targetPort: 7681
+---
+# Ingress: Traefik routes /lab/<labId> to the Service. The prefix is NOT
+# stripped — ttyd was started with `-b /lab/<labId>`, so it owns the full path.
+# Websockets (used by ttyd) pass through Traefik without extra config.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lab
+  namespace: lab-demo0lab0one
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          - path: /lab/demo0lab0one
+            pathType: Prefix
+            backend:
+              service:
+                name: lab
+                port:
+                  number: 7681

@@ -1,5 +1,12 @@
 .DEFAULT_GOAL := help
-.PHONY: help install typecheck lint test dev-up dev-down lab-image infra-plan
+.PHONY: help install typecheck lint test dev-up dev-down lab-image lab-image-import \
+        lab-example-up lab-example-down infra-plan
+
+# --- Local dev config ---
+CLUSTER      ?= labforge
+LAB_IMAGE    ?= labforge-lab:dev
+HTTP_PORT    ?= 8080            # host port -> cluster loadbalancer :80
+EXAMPLE_ID   ?= demo0lab0one    # >=12 url-safe chars, matches lab-example
 
 ## help: Show this help
 help:
@@ -22,17 +29,34 @@ lint:
 test:
 	npm test
 
-## dev-up: Create local k3d cluster (Phase 1)
+## dev-up: Create local k3d cluster (k3s + bundled Traefik), map :$(HTTP_PORT)->:80
 dev-up:
-	@echo "TODO(Phase 1): create k3d cluster"
+	k3d cluster create $(CLUSTER) \
+	  --servers 1 --agents 1 \
+	  -p "$(HTTP_PORT):80@loadbalancer" \
+	  --wait
+	kubectl cluster-info
 
-## dev-down: Tear down local k3d cluster (Phase 1)
+## dev-down: Delete the local k3d cluster
 dev-down:
-	@echo "TODO(Phase 1): delete k3d cluster"
+	k3d cluster delete $(CLUSTER)
 
-## lab-image: Build the lab terminal image (Phase 1)
+## lab-image: Build the lab terminal image for the local (arm64) node
 lab-image:
-	@echo "TODO(Phase 1): docker buildx the lab image"
+	docker buildx build --platform linux/arm64 -t $(LAB_IMAGE) --load images/lab
+
+## lab-image-import: Load the locally built lab image into the k3d cluster
+lab-image-import:
+	k3d image import $(LAB_IMAGE) -c $(CLUSTER)
+
+## lab-example-up: Apply the hand-written example lab namespace
+lab-example-up:
+	kubectl apply -f deploy/local/lab-example.yaml
+	@echo "Open: http://localhost:$(HTTP_PORT)/lab/$(EXAMPLE_ID)"
+
+## lab-example-down: Delete the hand-written example lab namespace
+lab-example-down:
+	kubectl delete -f deploy/local/lab-example.yaml --ignore-not-found
 
 ## infra-plan: terraform plan for OCI (Phase 8, never applies without confirmation)
 infra-plan:
