@@ -25,6 +25,28 @@ make lab-example-down    # remove the lab namespace
 make dev-down            # delete the cluster
 ```
 
+## Run the API (Phase 2)
+
+The API runs on your Mac against the k3d cluster (your kubeconfig) and a Docker Postgres.
+
+```bash
+make dev-db                                       # Postgres 16 on :5432
+cp services/api/.env.example services/api/.env    # DEV_FAKE_AUTH=true locally
+make api-run                                      # http://localhost:3000
+
+curl -s -XPOST localhost:3000/api/labs -H 'x-dev-user: alice'   # start a cold lab
+curl -s localhost:3000/api/labs/me     -H 'x-dev-user: alice'   # current lab
+curl -s -XDELETE localhost:3000/api/labs/me -H 'x-dev-user: alice'
+make test-integration                             # create -> Ready -> reachable -> delete
+```
+
+`x-dev-user` is trusted only when `DEV_FAKE_AUTH=true`, and config refuses to start with it
+when `NODE_ENV=production`. Google login replaces it in Phase 3.
+
+`rbac.yaml` holds the API's ServiceAccount and least-privilege ClusterRole (used once the API
+runs in-cluster, Phase 7). Inspect it with
+`kubectl auth can-i --list --as=system:serviceaccount:labforge:labforge-api`.
+
 ## The objects (in `lab-example.yaml`)
 
 | Object | Why it exists |

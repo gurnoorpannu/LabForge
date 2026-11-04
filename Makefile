@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
-.PHONY: help install typecheck lint test dev-up dev-down lab-image lab-image-import \
-        lab-example-up lab-example-down infra-plan
+.PHONY: help install typecheck lint test test-integration dev-up dev-down dev-db dev-db-down \
+        rbac api-run lab-image lab-image-import lab-example-up lab-example-down infra-plan
 
 # --- Local dev config ---
 CLUSTER      ?= labforge
@@ -28,6 +28,29 @@ lint:
 ## test: Run unit tests
 test:
 	npm test
+
+## test-integration: Run integration tests against k3d + dev-db (needs dev-up, dev-db, lab image)
+test-integration:
+	INTEGRATION=1 npx vitest run tests/integration
+
+## dev-db: Start a local Postgres 16 in Docker on :5432
+dev-db:
+	docker run -d --name labforge-db -p 5432:5432 \
+	  -e POSTGRES_USER=labforge -e POSTGRES_PASSWORD=labforge -e POSTGRES_DB=labforge \
+	  postgres:16
+
+## dev-db-down: Remove the local Postgres container
+dev-db-down:
+	docker rm -f labforge-db
+
+## rbac: Apply the API ServiceAccount + least-privilege ClusterRole
+rbac:
+	kubectl apply -f deploy/local/rbac.yaml
+
+## api-run: Build and run the API on the host against k3d (uses services/api/.env)
+api-run:
+	npm run typecheck
+	node --env-file=services/api/.env services/api/dist/index.js
 
 ## dev-up: Create local k3d cluster (k3s + bundled Traefik), map :$(HTTP_PORT)->:80
 dev-up:

@@ -1,0 +1,70 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# RBAC for labforge-api (Phase 2). Moves into the Helm chart in Phase 7.
+#
+# Least privilege: explicit verbs and resources, no wildcards. Each rule says
+# which code path needs it. "get" on objects is only granted where the code
+# reads them back.
+#
+# Known limitation: a ClusterRole can't be scoped to namespaces named `lab-*`,
+# so this SA could create pods in ANY namespace. Mitigations: the token only
+# lives in the API pod; system namespaces aren't PSA-restricted, but the API
+# only ever writes into namespaces it created; Phase 4 tests this boundary.
+#
+# Check:  kubectl auth can-i --list --as=system:serviceaccount:labforge:labforge-api
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: labforge
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: labforge-api
+  namespace: labforge
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: labforge-api
+rules:
+  # Create a lab (namespace = the lab), read it (integration check), delete it
+  # (end lab early; deletion cascades to everything inside), patch it (claim
+  # sets owner/expiry annotations, Phase 5).
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "get", "delete", "patch"]
+  # Create the lab pod, poll it for Ready, patch activeDeadlineSeconds and the
+  # expiry annotation on claim (Phase 5).
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "patch"]
+  # Per-lab objects, created once. Removed by namespace deletion, so no delete.
+  - apiGroups: [""]
+    resources: ["services", "resourcequotas", "limitranges"]
+    verbs: ["create"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create"]
+  # Ingress is created at claim time (warm labs have none).
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create"]
+  # Per-lab ForwardAuth middleware (Phase 3). API group verified then against
+  # the installed Traefik version.
+  - apiGroups: ["traefik.io"]
+    resources: ["middlewares"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: labforge-api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: labforge-api
+subjects:
+  - kind: ServiceAccount
+    name: labforge-api
+    namespace: labforge
