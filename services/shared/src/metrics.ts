@@ -1,8 +1,69 @@
-import { Counter, Histogram, Registry, collectDefaultMetrics } from "prom-client";
+import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from "prom-client";
+import type { LabStats } from "./labStore.js";
 
-// One registry per process. Phase 6 adds the gauges (labs_active, pool_ready, ...).
+// One registry per process.
 export const registry = new Registry();
 collectDefaultMetrics({ register: registry });
+
+/**
+ * Where the DB-derived metrics come from. The API sets it; every scrape then
+ * reads current lab counts and the reaper heartbeat from Postgres, so all API
+ * replicas report the same truth (alert on max(), not sum()).
+ */
+export interface DbMetricsSource {
+  stats(): Promise<LabStats>;
+  getHeartbeat(name: string): Promise<{ lastSuccess: Date; total: number } | null>;
+}
+let dbSource: DbMetricsSource | undefined;
+export function setDbMetricsSource(source: DbMetricsSource) {
+  dbSource = source;
+}
+
+export const labsActive = new Gauge({
+  name: "labforge_labs_active",
+  help: "Labs currently claimed by a user (not yet deleted).",
+  registers: [registry],
+  async collect() {
+    if (dbSource) this.set((await dbSource.stats()).claimed);
+  },
+});
+
+export const poolReady = new Gauge({
+  name: "labforge_pool_ready",
+  help: "Warm labs ready to be claimed.",
+  labelNames: ["state"] as const, // ready | warming
+  registers: [registry],
+  async collect() {
+    if (!dbSource) return;
+    const s = await dbSource.stats();
+    this.set({ state: "ready" }, s.ready);
+    this.set({ state: "warming" }, s.warming);
+  },
+});
+
+export const reaperLastSuccess = new Gauge({
+  name: "labforge_reaper_last_success_timestamp_seconds",
+  help: "Unix time of the reaper's last successful run (from its DB heartbeat).",
+  registers: [registry],
+  async collect() {
+    const hb = await dbSource?.getHeartbeat("reaper");
+    if (hb) this.set(hb.lastSuccess.getTime() / 1000);
+  },
+});
+
+export const labsReaped = new Counter({
+  name: "labforge_labs_reaped_total",
+  help: "Expired labs deleted by the reaper, all time (from its DB heartbeat).",
+  registers: [registry],
+  async collect() {
+    const hb = await dbSource?.getHeartbeat("reaper");
+    if (hb) {
+      // The count lives in Postgres (the reaper is a short-lived Job), so mirror it.
+      this.reset();
+      this.inc(hb.total);
+    }
+  },
+});
 
 export const labStartDuration = new Histogram({
   name: "labforge_lab_start_duration_seconds",

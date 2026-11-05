@@ -2,10 +2,12 @@ import fastifyCookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
 import {
   buildLab,
+  buildLabRoute,
   labRequests,
   labStartDuration,
   newLabId,
   registry,
+  setDbMetricsSource,
   type Config,
   type K8s,
   type LabRow,
@@ -31,6 +33,8 @@ export async function buildServer({ config, store, sessions, k8s, logger = true 
     trustProxy: true, // behind Traefik: req.ip comes from X-Forwarded-For
   });
 
+  if (!config.session.secret) throw new Error("SESSION_SECRET is required for the API");
+  setDbMetricsSource(store);
   await app.register(fastifyCookie, { secret: config.session.secret });
   await registerAuth(app, { config, sessions, store });
   await app.register(rateLimit, { global: false });
@@ -86,11 +90,10 @@ export async function buildServer({ config, store, sessions, k8s, logger = true 
     },
     async (req, reply) => {
       const user = req.user!;
-      const stopTimer = labStartDuration.startTimer({ started_from: "cold" });
+      const stopTimer = labStartDuration.startTimer();
 
-      const labId = newLabId();
-      const reserved = await store.reserveColdLab({
-        labId,
+      const reserved = await store.reserveLab({
+        newLabId: newLabId(),
         ownerId: user.id,
         ttlSeconds: config.lab.ttlSeconds,
         maxLabs: config.lab.maxConcurrent,
@@ -109,15 +112,21 @@ export async function buildServer({ config, store, sessions, k8s, logger = true 
       }
 
       const lab = reserved.lab;
+      const labId = lab.id;
+      const startedFrom = lab.started_from === "warm" ? "warm" : "cold";
       try {
         const expiresAt = Math.floor(lab.expires_at!.getTime() / 1000);
-        await k8s.applyLab(
-          buildLab(config, { labId, state: "claimed", ownerId: user.id, expiresAt }),
-        );
+        if (startedFrom === "warm") {
+          // Pod is already running: hand it over, then make it reachable.
+          await k8s.markClaimed(labId, user.id, expiresAt);
+          await k8s.applyLab(buildLabRoute(config, labId));
+        } else {
+          await k8s.applyLab(buildLab(config, { labId, state: "claimed", ownerId: user.id, expiresAt }));
+        }
         const ready = await k8s.waitForPodReady(labId, config.lab.readyTimeoutSeconds * 1000);
-        if (ready) stopTimer();
+        if (ready) stopTimer({ started_from: startedFrom });
         labRequests.inc({ result: "created" });
-        await store.audit(user.id, "lab.create", labId, { startedFrom: "cold", ready });
+        await store.audit(user.id, "lab.create", labId, { startedFrom, ready });
         return reply.code(201).send({ ...toDto(lab), ready });
       } catch (err) {
         labRequests.inc({ result: "error" });

@@ -14,12 +14,17 @@ if (!userId) {
 }
 
 const config = loadConfig();
+if (!config.session.secret) {
+  console.error("SESSION_SECRET is required");
+  process.exit(2);
+}
+const secret = config.session.secret;
 const pool = createPool(config.databaseUrl);
 try {
   await migrate(pool);
   await createLabStore(pool).upsertUser(userId, email ?? null);
   const token = await createSessionStore(pool).create(userId, config.session.ttlSeconds);
-  console.log(sessionCookieHeader(token, config.session.secret));
+  console.log(sessionCookieHeader(token, secret));
 } finally {
   await pool.end();
 }

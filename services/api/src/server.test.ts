@@ -95,6 +95,54 @@ describe("lab API", () => {
   });
 });
 
+describe("warm pool", () => {
+  it("claims a warm lab: hands over the running pod and only adds its route", async () => {
+    const { app, k8s, as, backend } = await setup();
+    backend.addWarmLab("warmlab000000001");
+    const res = await app.inject({ method: "POST", url: "/api/labs", headers: await as("alice") });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ labId: "warmlab000000001", startedFrom: "warm", ready: true });
+    expect(k8s.markClaimed).toHaveBeenCalledWith("warmlab000000001", "alice", expect.any(Number));
+    const kinds = k8s.applyLab.mock.calls[0]![0].map((o: { kind: string }) => o.kind);
+    expect(kinds).toEqual(["Middleware", "Ingress"]); // no new namespace, pod, ...
+  });
+
+  it("falls back to a cold start once the pool is empty, oldest warm lab first", async () => {
+    const { app, as, backend } = await setup();
+    backend.addWarmLab("warmlab00000000a");
+    backend.addWarmLab("warmlab00000000b");
+    const ids = [];
+    for (const u of ["u1", "u2", "u3"]) {
+      ids.push((await app.inject({ method: "POST", url: "/api/labs", headers: await as(u) })).json());
+    }
+    expect(ids.map((l) => l.startedFrom)).toEqual(["warm", "warm", "cold"]);
+    expect(ids[0].labId).toBe("warmlab00000000a");
+  });
+
+  it("rolls a failed warm claim back like a cold one", async () => {
+    const { app, k8s, as, backend } = await setup();
+    backend.addWarmLab("warmlab000000001");
+    k8s.markClaimed.mockRejectedValueOnce(new Error("boom"));
+    const headers = await as("alice");
+    expect((await app.inject({ method: "POST", url: "/api/labs", headers })).statusCode).toBe(500);
+    expect(k8s.deleteLab).toHaveBeenCalledWith("warmlab000000001");
+    expect((await app.inject({ method: "GET", url: "/api/labs/me", headers })).statusCode).toBe(404);
+  });
+
+  it("exposes pool and active-lab gauges from the database", async () => {
+    const { app, as, backend } = await setup();
+    backend.addWarmLab("warmlab000000001");
+    backend.addWarmLab("warmlab000000002");
+    await app.inject({ method: "POST", url: "/api/labs", headers: await as("alice") });
+    await backend.store.heartbeat("reaper", 3);
+    const body = (await app.inject({ method: "GET", url: "/metrics" })).body;
+    expect(body).toMatch(/^labforge_labs_active 1$/m);
+    expect(body).toMatch(/^labforge_pool_ready\{state="ready"\} 1$/m);
+    expect(body).toMatch(/^labforge_labs_reaped_total 3$/m);
+    expect(body).toMatch(/^labforge_reaper_last_success_timestamp_seconds \d+/m);
+  });
+});
+
 describe("/auth/verify (Traefik ForwardAuth)", () => {
   const verify = (app: Awaited<ReturnType<typeof setup>>["app"], lab: string | null, headers = {}) =>
     app.inject({ method: "GET", url: lab === null ? "/auth/verify" : `/auth/verify?lab=${lab}`, headers });
