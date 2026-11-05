@@ -1,0 +1,63 @@
+# LabForge alerts. Picked up by kube-prometheus-stack's Prometheus (its
+# ruleSelector is opened up in ../kube-prometheus-stack-values.yaml).
+# Each alert links to its runbook; Alertmanager sends them to Discord.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: labforge
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: labforge
+spec:
+  groups:
+    - name: labforge.rules
+      rules:
+        - alert: PoolEmpty
+          # max(): every API replica reports the same DB-derived value.
+          expr: max(labforge_pool_ready{state="ready"}) == 0
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: No warm labs ready for 5 minutes
+            description: Every lab start is a cold start (slower). Pool controller down, at the cap, or labs failing to start.
+            runbook_url: https://github.com/gurnoorpannu/LabForge/blob/main/docs/runbooks/pool-empty.md
+
+        - alert: ReaperStale
+          # Also fires if the heartbeat metric vanished (reaper never succeeded).
+          expr: (time() - max(labforge_reaper_last_success_timestamp_seconds)) > 600 or absent(labforge_reaper_last_success_timestamp_seconds)
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: Reaper hasn't succeeded in over 10 minutes
+            description: Expired labs are not being deleted by the reaper (activeDeadlineSeconds is still the backstop).
+            runbook_url: https://github.com/gurnoorpannu/LabForge/blob/main/docs/runbooks/reaper-stale.md
+
+        - alert: LabsStuckPending
+          expr: max by (namespace, pod) (kube_pod_status_phase{namespace=~"lab-.*", phase="Pending"}) == 1
+          for: 2m
+          labels: { severity: warning }
+          annotations:
+            summary: Lab pod {{ $labels.namespace }}/{{ $labels.pod }} Pending for 2+ minutes
+            description: Usually no node has room (requests), or the lab image can't be pulled.
+            runbook_url: https://github.com/gurnoorpannu/LabForge/blob/main/docs/runbooks/labs-stuck-pending.md
+
+        - alert: NodeMemoryPressure
+          expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.85
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: Node {{ $labels.instance }} memory above 85% for 5 minutes
+            description: The kubelet will start evicting pods soon; labs are the first to go.
+            runbook_url: https://github.com/gurnoorpannu/LabForge/blob/main/docs/runbooks/node-pressure.md
+
+        - alert: HighLabStartLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(labforge_lab_start_duration_seconds_bucket{started_from="warm"}[10m]))
+            ) > 5
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: p95 warm lab start above 5s for 10 minutes
+            description: Warm starts should take well under a second. Check API latency, Kubernetes API latency, Postgres.
+            runbook_url: https://github.com/gurnoorpannu/LabForge/blob/main/docs/runbooks/high-start-latency.md

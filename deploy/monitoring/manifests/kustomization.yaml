@@ -1,0 +1,15 @@
+# Applied by the labforge-monitoring ArgoCD Application (or `kubectl apply -k`).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+resources:
+  - prometheus-rules.yaml
+configMapGenerator:
+  # Grafana's sidecar (kube-prometheus-stack) loads ConfigMaps with this label.
+  - name: labforge-dashboard
+    files:
+      - labforge-dashboard.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
