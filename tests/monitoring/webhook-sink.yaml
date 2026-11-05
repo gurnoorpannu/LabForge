@@ -1,0 +1,50 @@
+# Test-only stand-in for Discord: logs every webhook POST it receives, so the
+# alert path (Prometheus -> Alertmanager -> "Discord") can be checked locally
+# without a real webhook. See tests/monitoring/README.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhook-sink
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: webhook-sink }
+  template:
+    metadata:
+      labels: { app: webhook-sink }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: sink
+          image: labforge-lab:dev   # any image with python3
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "-u", "-c"]
+          args:
+            - |
+              import http.server
+              class H(http.server.BaseHTTPRequestHandler):
+                  def do_POST(self):
+                      body = self.rfile.read(int(self.headers.get("content-length", 0))).decode()
+                      print("POST", self.path, body, flush=True)
+                      self.send_response(204); self.end_headers()
+                  def log_message(self, *a): pass
+              http.server.HTTPServer(("", 8080), H).serve_forever()
+          ports: [{ containerPort: 8080 }]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webhook-sink
+  namespace: monitoring
+spec:
+  selector: { app: webhook-sink }
+  ports: [{ port: 8080, targetPort: 8080 }]

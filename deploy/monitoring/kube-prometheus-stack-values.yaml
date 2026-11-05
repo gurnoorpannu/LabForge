@@ -69,9 +69,11 @@ grafana:
     existingSecret: grafana-admin
     userKey: admin-user
     passwordKey: admin-password
+  # Grafana 13 needs headroom at startup: at a 256Mi limit it sat at ~230Mi
+  # burning ~6 cores in GC and never came up before its liveness probe fired.
   resources:
-    requests: { cpu: 50m, memory: 128Mi }
-    limits: { memory: 256Mi }
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { memory: 768Mi }
 
 kube-state-metrics:
   resources:
