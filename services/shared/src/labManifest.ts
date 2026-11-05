@@ -43,7 +43,10 @@ export interface LabParams {
 
 /**
  * Every object for one lab, in apply order (namespace first).
- * A "ready" (warm) lab has no Ingress: nobody can reach it until it is claimed.
+ * Warm labs get their route too, at warm time: /auth/verify admits only the
+ * owner, and an unclaimed lab has none, so its URL answers 403 to everyone
+ * until it is claimed. Creating it early means a claim needs no new Traefik
+ * config, which Traefik only applies every ~2s (ADR-0009).
  */
 export function buildLab(cfg: Config, p: LabParams): KubernetesObject[] {
   if (p.state === "claimed" && (p.expiresAt === undefined || p.ownerId === undefined)) {
@@ -57,7 +60,7 @@ export function buildLab(cfg: Config, p: LabParams): KubernetesObject[] {
     pod(cfg, p),
     service(p),
   ];
-  if (p.state === "claimed") objects.push(...buildLabRoute(cfg, p.labId));
+  objects.push(...buildLabRoute(cfg, p.labId));
   return objects;
 }
 

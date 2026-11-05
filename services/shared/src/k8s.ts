@@ -45,8 +45,14 @@ export function createK8s(kc: KubeConfig = defaultKubeConfig()) {
 
   return {
     /** Create objects in order. The namespace comes first, so later objects can land in it. */
-    async applyLab(specs: KubernetesObject[]): Promise<void> {
-      for (const spec of specs) await objects.create(spec);
+    async applyLab(specs: KubernetesObject[], opts: { ignoreExisting?: boolean } = {}): Promise<void> {
+      for (const spec of specs) {
+        try {
+          await objects.create(spec);
+        } catch (err) {
+          if (!(opts.ignoreExisting && err instanceof ApiException && err.code === 409)) throw err;
+        }
+      }
     },
 
     /** Deleting the namespace garbage-collects everything in it. Idempotent. */

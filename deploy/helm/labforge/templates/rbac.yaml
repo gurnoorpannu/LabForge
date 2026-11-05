@@ -62,8 +62,8 @@ metadata:
   name: labforge-pool-controller
   labels: {{- include "labforge.labels" . | nindent 4 }}
 rules:
-  # Observe every lab (two list calls per pass), create warm labs, delete
-  # orphaned/recycled ones. Warm labs have no Ingress or Middleware.
+  # Observe every lab (two list calls per pass), create warm labs (including
+  # their route, which admits nobody until claimed), delete orphaned/recycled ones.
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["list", "create", "delete"]
@@ -74,7 +74,10 @@ rules:
     resources: ["services", "resourcequotas", "limitranges"]
     verbs: ["create"]
   - apiGroups: ["networking.k8s.io"]
-    resources: ["networkpolicies"]
+    resources: ["networkpolicies", "ingresses"]
+    verbs: ["create"]
+  - apiGroups: ["traefik.io"]
+    resources: ["middlewares"]
     verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

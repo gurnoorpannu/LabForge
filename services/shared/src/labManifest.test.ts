@@ -128,10 +128,11 @@ describe("buildLab", () => {
     expect(prod.spec?.rules?.[0]?.host).toBe("labs.gurnoor.online");
   });
 
-  it("builds an unreachable warm lab: no ingress, no owner, no deadline", () => {
+  it("builds a warm lab with its route but no owner (verify admits nobody) and no deadline", () => {
     const objs = buildLab(cfg(), { labId: "abcdefghijklmnop", state: "ready", now: NOW });
-    expect(objs.map((o) => o.kind)).not.toContain("Ingress");
-    expect(objs.map((o) => o.kind)).not.toContain("Middleware");
+    // Route pre-created so a claim needs no Traefik reload (ADR-0009); with no
+    // owner annotation/row, /auth/verify answers 403 for every session.
+    expect(objs.map((o) => o.kind).slice(-2)).toEqual(["Middleware", "Ingress"]);
     expect(byKind<V1Namespace>(objs, "Namespace").metadata?.annotations).toEqual({});
     expect(byKind<V1Pod>(objs, "Pod").spec?.activeDeadlineSeconds).toBeUndefined();
   });

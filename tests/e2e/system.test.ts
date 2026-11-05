@@ -114,6 +114,14 @@ describe.skipIf(!enabled)(`LabForge end to end (${BASE})`, () => {
     expect(await wsHandshake(`${aliceLab.url}ws`, cookie.bob)).toBe(403);
   }, 60_000);
 
+  it("an unclaimed warm lab's route is live but refuses every user (403)", async () => {
+    const warm = (await kubectl("get", "ns", "-l", "labforge.io/state=ready", "-o", "jsonpath={.items[0].metadata.labels.labforge\\.io/lab-id}"));
+    expect(warm).toMatch(/^[a-z0-9]{12,32}$/);
+    expect((await api("GET", `/lab/${warm}/`, cookie.bob)).status).toBe(403);
+    expect((await api("GET", `/lab/${warm}/`)).status).toBe(401);
+    expect(await wsHandshake(`${BASE}/lab/${warm}/ws`, cookie.bob)).toBe(403);
+  });
+
   it("refills the warm pool after a claim", async () => {
     await waitFor("pool refilled", async () => (await metric('labforge_pool_ready{state="ready"}')) >= 2, 120_000);
   }, 130_000);

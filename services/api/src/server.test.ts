@@ -97,15 +97,17 @@ describe("lab API", () => {
 });
 
 describe("warm pool", () => {
-  it("claims a warm lab: hands over the running pod and only adds its route", async () => {
+  it("claims a warm lab: hands over the running pod, route already exists", async () => {
     const { app, k8s, as, backend } = await setup();
     backend.addWarmLab("warmlab000000001");
     const res = await app.inject({ method: "POST", url: "/api/labs", headers: await as("alice") });
     expect(res.statusCode).toBe(201);
     expect(res.json()).toMatchObject({ labId: "warmlab000000001", startedFrom: "warm", ready: true });
     expect(k8s.markClaimed).toHaveBeenCalledWith("warmlab000000001", "alice", expect.any(Number));
-    const kinds = k8s.applyLab.mock.calls[0]![0].map((o: { kind: string }) => o.kind);
-    expect(kinds).toEqual(["Middleware", "Ingress"]); // no new namespace, pod, ...
+    // Only the (idempotent) route: no new namespace, pod, ...
+    const [objs, opts] = k8s.applyLab.mock.calls[0]!;
+    expect(objs.map((o: { kind: string }) => o.kind)).toEqual(["Middleware", "Ingress"]);
+    expect(opts).toEqual({ ignoreExisting: true });
   });
 
   it("falls back to a cold start once the pool is empty, oldest warm lab first", async () => {
@@ -157,6 +159,13 @@ describe("/auth/verify (Traefik ForwardAuth)", () => {
     expect((await verify(app, labId, alice)).statusCode).toBe(200);
     expect((await verify(app, labId)).statusCode).toBe(401);
     expect((await verify(app, labId, bob)).statusCode).toBe(403);
+  });
+
+  it("denies everyone an unclaimed warm lab (its route exists before any claim)", async () => {
+    const { app, as, backend } = await setup();
+    backend.addWarmLab("warmlab000000001");
+    expect((await verify(app, "warmlab000000001", await as("alice"))).statusCode).toBe(403);
+    expect((await verify(app, "warmlab000000001")).statusCode).toBe(401);
   });
 
   it("denies a lab that has expired, before the reaper gets to it", async () => {

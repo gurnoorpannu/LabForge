@@ -112,9 +112,11 @@ export async function buildServer({ config, store, sessions, k8s, logger = true 
       try {
         const expiresAt = Math.floor(lab.expires_at!.getTime() / 1000);
         if (startedFrom === "warm") {
-          // Pod is already running: hand it over, then make it reachable.
+          // Pod and route already exist (the route admitted nobody until now):
+          // just hand it over. ensure-route covers warm labs made before routes
+          // were created at warm time (409 = already there).
           await k8s.markClaimed(labId, user.id, expiresAt);
-          await k8s.applyLab(buildLabRoute(config, labId));
+          await k8s.applyLab(buildLabRoute(config, labId), { ignoreExisting: true });
         } else {
           await k8s.applyLab(buildLab(config, { labId, state: "claimed", ownerId: user.id, expiresAt }));
         }

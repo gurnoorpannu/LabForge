@@ -71,8 +71,10 @@ describe.skipIf(!enabled)("warm pool + reaper lifecycle (k3d + Postgres)", () =>
     expect(res.ok && res.lab.started_from).toBe("warm");
     claimedId = res.ok ? res.lab.id : "";
     const expiresAt = Math.floor(Date.now() / 1000) + 120;
-    await k8s.markClaimed(claimedId, "lifecycle-user", expiresAt); // what the API does
-    await k8s.applyLab(buildLabRoute(cfg, claimedId));
+    // What the API does. The route was created with the warm lab (ADR-0009), so
+    // the idempotent create is a no-op (409 ignored).
+    await k8s.markClaimed(claimedId, "lifecycle-user", expiresAt);
+    await k8s.applyLab(buildLabRoute(cfg, claimedId), { ignoreExisting: true });
 
     await until("pool refilled", async () => {
       const s = await stats();
