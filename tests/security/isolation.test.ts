@@ -12,9 +12,11 @@ import { buildLab, createK8s, labNamespace, loadConfig, newLabId } from "@labfor
 import { execFile } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { promisify } from "node:util";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const run = promisify(execFile);
+// Dropped (not rejected) packets make each blocked probe wait its full 4s.
+vi.setConfig({ testTimeout: 60_000 });
 const enabled = process.env.SECURITY === "1";
 const PROBE_NS = "labforge-sectest";
 
@@ -51,6 +53,10 @@ const inProbe = (script: string) => kubectl(["-n", PROBE_NS, "exec", "probe", "-
 /** TCP connect within 4s. Works for any protocol; exit 0 = connected. */
 const tcp = (host: string, port: number | string) =>
   `timeout 4 bash -c '</dev/tcp/${host}/${port}' 2>/dev/null && echo connected || echo refused-or-timeout`;
+// Only these exact outputs count. Anything else (e.g. a kubectl error because a
+// pod is missing) must fail the check, never pass it as "blocked".
+const CONNECTED = "connected";
+const BLOCKED = "refused-or-timeout";
 
 describe.skipIf(!enabled)("lab isolation (attacks from inside a lab)", () => {
   const k8s = createK8s();
@@ -72,14 +78,18 @@ describe.skipIf(!enabled)("lab isolation (attacks from inside a lab)", () => {
     for (const id of Object.values(lab)) {
       await k8s.applyLab(buildLab(cfg, { labId: id, state: "ready" }));
     }
-    // A plain pod with no NetworkPolicy, for positive controls.
-    await kubectl(["create", "namespace", PROBE_NS]);
+    // A plain pod with no NetworkPolicy, for positive controls. A previous run's
+    // namespace may still be terminating: wait for it to be gone first.
+    await kubectl(["wait", "--for=delete", `namespace/${PROBE_NS}`, "--timeout=180s"], 200_000);
+    const created = await kubectl(["create", "namespace", PROBE_NS]);
+    expect(created.code, created.out).toBe(0);
     await kubectl([
       "-n", PROBE_NS, "run", "probe", `--image=${cfg.lab.image}`, "--image-pull-policy=IfNotPresent",
       "--restart=Never", "--command", "--", "sleep", "1800",
     ]);
     for (const id of Object.values(lab)) expect(await k8s.waitForPodReady(id, 120_000)).toBe(true);
-    await kubectl(["-n", PROBE_NS, "wait", "--for=condition=Ready", "pod/probe", "--timeout=120s"]);
+    const probeReady = await kubectl(["-n", PROBE_NS, "wait", "--for=condition=Ready", "pod/probe", "--timeout=120s"]);
+    expect(probeReady.code, `probe pod not ready: ${probeReady.out}`).toBe(0);
 
     t.apiClusterIp = await jsonpath(["-n", "default", "get", "svc", "kubernetes", "{.spec.clusterIP}"]);
     t.nodeIps = await jsonpath(["get", "nodes", '{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address} {end}']);
@@ -98,10 +108,10 @@ describe.skipIf(!enabled)("lab isolation (attacks from inside a lab)", () => {
     printReport();
   });
 
-  /** Record a row; `pass` is asserted at the end so every row gets printed. */
+  /** Record a row. Soft assertion: a failure is reported but later rows still run. */
   const record = (r: Row) => {
     rows.push(r);
-    if (r.pass !== null) expect(r.pass, `${r.area}: ${r.check} (observed: ${r.observed})`).toBe(true);
+    if (r.pass !== null) expect.soft(r.pass, `${r.area}: ${r.check} (observed: ${r.observed})`).toBe(true);
   };
 
   /** From lab A must fail; from the policy-free probe must succeed. */
@@ -113,7 +123,7 @@ describe.skipIf(!enabled)("lab isolation (attacks from inside a lab)", () => {
       check: `${check} (${host}:${port})`,
       expected: "blocked (reachable without the policy)",
       observed: `lab: ${fromLab}; control: ${fromProbe}`,
-      pass: fromLab !== "connected" && fromProbe === "connected",
+      pass: fromLab === BLOCKED && fromProbe === CONNECTED,
     });
   }
 
@@ -139,7 +149,7 @@ describe.skipIf(!enabled)("lab isolation (attacks from inside a lab)", () => {
         check: `another lab's ${what} (${host}:7681)`,
         expected: "blocked, also for non-Traefik pods",
         observed: `lab: ${fromLab}; other pod: ${fromProbe}`,
-        pass: fromLab !== "connected" && fromProbe !== "connected",
+        pass: fromLab === BLOCKED && fromProbe === BLOCKED,
       });
     }
   });
@@ -148,7 +158,7 @@ describe.skipIf(!enabled)("lab isolation (attacks from inside a lab)", () => {
 
   it("reaches CoreDNS on port 53 only (not its metrics port)", async () => {
     const dns53 = (await inLab(ns.a, tcp(t.dnsPod!, 53))).out;
-    record({ area: "network", check: `CoreDNS ${t.dnsPod}:53`, expected: "allowed", observed: dns53, pass: dns53 === "connected" });
+    record({ area: "network", check: `CoreDNS ${t.dnsPod}:53`, expected: "allowed", observed: dns53, pass: dns53 === CONNECTED });
     await blocked("network", "CoreDNS metrics", t.dnsPod!, 9153);
   });
 
@@ -159,7 +169,7 @@ describe.skipIf(!enabled)("lab isolation (attacks from inside a lab)", () => {
       check: "cloud metadata (169.254.169.254:80)",
       expected: "blocked",
       observed: fromLab,
-      pass: fromLab !== "connected",
+      pass: fromLab === BLOCKED,
     });
   });
 
@@ -169,16 +179,27 @@ describe.skipIf(!enabled)("lab isolation (attacks from inside a lab)", () => {
       rows.push({ area: "network", check: "platform services in ns labforge", expected: "blocked", observed: "none deployed here", pass: null });
       return;
     }
+    // Two walls: the lab's own egress policy, and the platform namespace's
+    // default-deny ingress. So the policy-free probe must be refused too; the
+    // services being up is proven by the API answering /readyz with db:true.
     for (const s of services) {
       const [name, addr] = s.split("=") as [string, string];
       const [host, port] = addr.split(":") as [string, string];
-      await blocked("network", `platform service ${name}`, host, port);
+      const fromLab = (await inLab(ns.a, tcp(host, port))).out;
+      const fromProbe = (await inProbe(tcp(host, port))).out;
+      record({
+        area: "network",
+        check: `platform service ${name} (${host}:${port})`,
+        expected: "blocked, also for non-allowed pods",
+        observed: `lab: ${fromLab}; other pod: ${fromProbe}`,
+        pass: fromLab === BLOCKED && fromProbe === BLOCKED,
+      });
     }
   });
 
   it("other workloads in the cluster cannot reach a lab (only Traefik can)", async () => {
     const res = (await inProbe(tcp(t.labBPod!, 7681))).out;
-    record({ area: "network", check: "non-Traefik pod -> lab :7681", expected: "blocked", observed: res, pass: res !== "connected" });
+    record({ area: "network", check: "non-Traefik pod -> lab :7681", expected: "blocked", observed: res, pass: res === BLOCKED });
   });
 
   // --- network: what a lab IS allowed ----------------------------------------------
@@ -280,16 +301,22 @@ describe.skipIf(!enabled)("lab isolation (attacks from inside a lab)", () => {
   }, 180_000);
 
   it("caps disk: filling past ephemeral-storage gets the lab evicted", async () => {
-    await inLab(ns.disk, "dd if=/dev/zero of=/home/lab/fill bs=1M count=700 2>/dev/null; echo done", 120_000);
+    const wrote = await inLab(ns.disk, "dd if=/dev/zero of=/home/lab/fill bs=1M count=700 2>/dev/null; du -sm /home/lab | cut -f1", 120_000);
     // The kubelet's eviction manager checks usage periodically (~1 min on k3d).
     // On 1.35 the evicted pod ends "Succeeded" with no status.reason, so read the event.
     let evicted = "";
-    for (let i = 0; i < 60 && !evicted; i++) {
+    for (let i = 0; i < 100 && !evicted; i++) {
       evicted = await jsonpath(["-n", ns.disk, "get", "events", "--field-selector", "involvedObject.name=lab,reason=Evicted", "{.items[*].message}"]);
       if (!evicted) await new Promise((r) => setTimeout(r, 3000));
     }
-    record({ area: "limits", check: "write 700Mi to /home/lab (limit 512Mi)", expected: "pod evicted", observed: evicted || "not evicted after 3 min", pass: evicted.startsWith("Pod ephemeral local storage") });
-  }, 300_000);
+    record({
+      area: "limits",
+      check: "write 700Mi to /home/lab (limit 512Mi)",
+      expected: "pod evicted",
+      observed: evicted || `not evicted after 5 min (du after write: ${wrote.out} MiB)`,
+      pass: evicted.startsWith("Pod ephemeral local storage"),
+    });
+  }, 420_000);
 });
 
 function printReport() {
