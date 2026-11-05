@@ -1,0 +1,66 @@
+# Platform namespace: deny all ingress, then allow exactly the callers each
+# component has. (Labs are already blocked by their own egress policy; this is
+# the second wall.) Egress is left open: the API needs the Kubernetes API
+# server and Google, whose addresses aren't stable enough to pin.
+{{- $kv := splitList "=" .Values.ingress.controllerPodSelector }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: labforge-default-deny-ingress
+  labels: {{- include "labforge.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: labforge-api
+  labels: {{- include "labforge.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "labforge.selector" (dict "component" "api") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    # Traefik: user traffic and ForwardAuth calls.
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Values.ingress.controllerNamespace }} }
+          podSelector:
+            matchLabels: { {{ index $kv 0 }}: {{ index $kv 1 | quote }} }
+      ports: [{ protocol: TCP, port: 3000 }]
+    # Prometheus scrapes /metrics on the private port.
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Values.monitoring.namespace }} }
+      ports: [{ protocol: TCP, port: 9090 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: labforge-postgres
+  labels: {{- include "labforge.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "labforge.selector" (dict "component" "postgres") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { labforge.io/db-client: "true" }
+      ports: [{ protocol: TCP, port: 5432 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: labforge-pool-controller
+  labels: {{- include "labforge.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "labforge.selector" (dict "component" "pool-controller") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Values.monitoring.namespace }} }
+      ports: [{ protocol: TCP, port: 9090 }]

@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: labforge-pool-controller
+  labels: {{- include "labforge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pool-controller
+spec:
+  selector: {{- include "labforge.selector" (dict "component" "pool-controller") | nindent 4 }}
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: labforge-pool-controller
+  labels: {{- include "labforge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pool-controller
+spec:
+  replicas: {{ .Values.poolController.replicas }}
+  selector:
+    matchLabels: {{- include "labforge.selector" (dict "component" "pool-controller") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "labforge.selector" (dict "component" "pool-controller") | nindent 8 }}
+        labforge.io/db-client: "true"
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: labforge-pool-controller
+      enableServiceLinks: false
+      securityContext: {{- include "labforge.podSecurity" dict | nindent 8 }}
+      containers:
+        - name: pool-controller
+          image: {{ include "labforge.image" (dict "root" . "name" .Values.images.poolController) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          ports:
+            - name: metrics
+              containerPort: 9090
+          envFrom:
+            - configMapRef:
+                name: labforge-config
+          env: {{- include "labforge.dbEnv" . | nindent 12 }}
+          livenessProbe:
+            httpGet: { path: /healthz, port: metrics }
+            periodSeconds: 10
+          resources: {{- toYaml .Values.poolController.resources | nindent 12 }}
+          securityContext: {{- include "labforge.containerSecurity" . | nindent 12 }}

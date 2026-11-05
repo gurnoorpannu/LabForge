@@ -1,0 +1,12 @@
+# OCI k3s cluster, deployed by ArgoCD (deploy/argocd/application.yaml).
+# images.tag is rewritten by .github/workflows/images.yml on every main build.
+images:
+  registry: ghcr.io/gurnoorpannu
+  tag: latest
+  pullPolicy: IfNotPresent
+publicBaseUrl: https://labs.gurnoor.online
+host: labs.gurnoor.online
+network:
+  nodeCidr: 10.0.1.0/24   # infra/terraform subnet_cidr
+monitoring:
+  serviceMonitors: true

@@ -1,0 +1,4 @@
+# Layered on values-local.yaml by `make test-e2e`: short TTL so expiry and the
+# reaper/deadline cleanup can be observed in a few minutes.
+lab:
+  ttl: 2m

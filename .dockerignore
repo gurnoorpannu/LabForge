@@ -1,0 +1,16 @@
+# Build context for services/Dockerfile is the repo root. Keep secrets and
+# everything the services don't need out of it.
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+.git
+.github
+infra
+docs
+tests
+deploy
+images
+*.md

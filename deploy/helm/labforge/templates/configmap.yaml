@@ -1,0 +1,39 @@
+# Settings shared by the API, pool controller and reaper. Each is validated at
+# startup by services/shared/src/config.ts.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: labforge-config
+  labels: {{- include "labforge.labels" . | nindent 4 }}
+data:
+  NODE_ENV: production
+  LOG_LEVEL: {{ .Values.api.logLevel | quote }}
+  PUBLIC_BASE_URL: {{ .Values.publicBaseUrl | quote }}
+  {{- with .Values.host }}
+  INGRESS_HOST: {{ . | quote }}
+  {{- end }}
+  INGRESS_CLASS: {{ .Values.ingress.className | quote }}
+  INGRESS_NAMESPACE: {{ .Values.ingress.controllerNamespace | quote }}
+  INGRESS_POD_SELECTOR: {{ .Values.ingress.controllerPodSelector | quote }}
+  AUTH_VERIFY_URL: "http://labforge-api.{{ .Release.Namespace }}.svc.cluster.local:3000/auth/verify"
+  LAB_IMAGE: {{ include "labforge.image" (dict "root" . "name" .Values.images.lab) | quote }}
+  LAB_IMAGE_PULL_POLICY: {{ .Values.images.pullPolicy | quote }}
+  LAB_TTL: {{ .Values.lab.ttl | quote }}
+  LAB_READY_TIMEOUT: {{ .Values.lab.readyTimeout | quote }}
+  POOL_SIZE: {{ .Values.lab.poolSize | quote }}
+  POOL_MAX_AGE: {{ .Values.lab.poolMaxAge | quote }}
+  POOL_RECONCILE_INTERVAL: {{ .Values.poolController.reconcileInterval | quote }}
+  MAX_CONCURRENT_LABS: {{ .Values.lab.maxConcurrent | quote }}
+  LAB_CPU_REQUEST: {{ .Values.lab.resources.requests.cpu | quote }}
+  LAB_CPU_LIMIT: {{ .Values.lab.resources.limits.cpu | quote }}
+  LAB_MEMORY_REQUEST: {{ .Values.lab.resources.requests.memory | quote }}
+  LAB_MEMORY_LIMIT: {{ .Values.lab.resources.limits.memory | quote }}
+  LAB_EPHEMERAL_REQUEST: {{ .Values.lab.resources.requests.ephemeralStorage | quote }}
+  LAB_EPHEMERAL_LIMIT: {{ .Values.lab.resources.limits.ephemeralStorage | quote }}
+  LAB_INTERNET_EGRESS: {{ .Values.lab.internetEgress | quote }}
+  NODE_CIDR: {{ required "network.nodeCidr is required (the node subnet labs must not reach)" .Values.network.nodeCidr | quote }}
+  POD_CIDR: {{ .Values.network.podCidr | quote }}
+  SERVICE_CIDR: {{ .Values.network.serviceCidr | quote }}
+  METADATA_CIDR: {{ .Values.network.metadataCidr | quote }}
+  RATE_LIMIT_PER_MIN: {{ .Values.api.rateLimitPerMin | quote }}
+  SESSION_TTL: {{ .Values.api.sessionTtl | quote }}

@@ -1,0 +1,38 @@
+# Deletes expired labs every minute. The pods' activeDeadlineSeconds is the
+# second, independent cleanup layer (see docs/adr/0004).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: labforge-reaper
+  labels: {{- include "labforge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: reaper
+spec:
+  schedule: {{ .Values.reaper.schedule | quote }}
+  suspend: {{ .Values.reaper.suspend }}
+  concurrencyPolicy: Forbid       # never two reapers at once
+  startingDeadlineSeconds: 30     # a missed minute is skipped, not piled up
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0             # the next minute's run is the retry
+      activeDeadlineSeconds: 50
+      template:
+        metadata:
+          labels: {{- include "labforge.selector" (dict "component" "reaper") | nindent 12 }}
+            labforge.io/db-client: "true"
+        spec:
+          restartPolicy: Never
+          serviceAccountName: labforge-reaper
+          enableServiceLinks: false
+          securityContext: {{- include "labforge.podSecurity" dict | nindent 12 }}
+          containers:
+            - name: reaper
+              image: {{ include "labforge.image" (dict "root" . "name" .Values.images.reaper) }}
+              imagePullPolicy: {{ .Values.images.pullPolicy }}
+              envFrom:
+                - configMapRef:
+                    name: labforge-config
+              env: {{- include "labforge.dbEnv" . | nindent 16 }}
+              resources: {{- toYaml .Values.reaper.resources | nindent 16 }}
+              securityContext: {{- include "labforge.containerSecurity" . | nindent 16 }}

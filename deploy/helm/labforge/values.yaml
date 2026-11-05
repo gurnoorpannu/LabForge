@@ -1,0 +1,96 @@
+# Defaults are production-shaped. Overrides: values-local.yaml (k3d), values-prod.yaml (OCI).
+
+images:
+  # Registry prefix for the four images. "" = images imported straight into the
+  # cluster (k3d), no registry.
+  registry: ghcr.io/gurnoorpannu
+  # CI rewrites this in values-prod.yaml to the git SHA it built; ArgoCD deploys it.
+  tag: latest
+  pullPolicy: IfNotPresent
+  api: labforge-api
+  poolController: labforge-pool-controller
+  reaper: labforge-reaper
+  lab: labforge-lab
+
+# URL users open; lab links are <publicBaseUrl>/lab/<id>/. API and labs share one host.
+publicBaseUrl: https://labs.gurnoor.online
+# Host rule on the API and lab Ingresses. "" = any host.
+host: labs.gurnoor.online
+
+network:
+  # REQUIRED, no default. The node network (OCI subnet / k3d docker network).
+  # Labs must not reach it: the API server's ClusterIP is DNAT'd to a node IP
+  # before NetworkPolicy is evaluated. Rendering fails if unset.
+  nodeCidr: ""
+  podCidr: 10.42.0.0/16
+  serviceCidr: 10.43.0.0/16
+  metadataCidr: 169.254.169.254/32
+
+ingress:
+  className: traefik
+  # Where the ingress controller runs, and its pods' label. Only these pods may
+  # reach labs and the API.
+  controllerNamespace: kube-system
+  controllerPodSelector: app.kubernetes.io/name=traefik
+
+lab:
+  ttl: 45m
+  readyTimeout: 60s
+  poolSize: 3
+  poolMaxAge: 6h
+  # 2 nodes x 2 OCPU, ~1 CPU reserved for system pods, 250m request per lab ->
+  # ~12 schedulable; 10 leaves headroom. Memory (24 GB) is not the binding limit.
+  maxConcurrent: 10
+  internetEgress: true
+  resources:
+    requests: { cpu: 250m, memory: 256Mi, ephemeralStorage: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi, ephemeralStorage: 512Mi }
+
+api:
+  replicas: 2
+  rateLimitPerMin: 5
+  sessionTtl: 12h
+  logLevel: info
+  # Secret you create by hand (see docs/operations.md):
+  #   SESSION_SECRET, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET
+  existingSecret: labforge-api
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+poolController:
+  # 2 replicas: a Postgres advisory lock makes one the leader, the other a hot standby.
+  replicas: 2
+  reconcileInterval: 5s
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 192Mi }
+
+reaper:
+  schedule: "* * * * *"
+  # Set true to stop the reaper (tests the activeDeadlineSeconds safety net).
+  suspend: false
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 192Mi }
+
+postgres:
+  image: postgres:16.15-alpine
+  storage: 5Gi
+  storageClass: local-path   # k3s built-in
+  # Secret with POSTGRES_PASSWORD (URL-safe, e.g. `openssl rand -hex 24`).
+  existingSecret: labforge-postgres
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+# Local/test only: have the chart create both Secrets with fixed throwaway
+# values instead of using existing ones. Never in production.
+devSecrets:
+  create: false
+
+monitoring:
+  # ServiceMonitors for kube-prometheus-stack (needs its CRDs installed).
+  serviceMonitors: false
+  # Namespace Prometheus runs in; allowed to scrape the platform pods.
+  namespace: monitoring

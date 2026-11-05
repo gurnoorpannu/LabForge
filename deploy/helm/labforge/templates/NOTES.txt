@@ -1,0 +1,12 @@
+LabForge {{ .Chart.AppVersion }} installed in namespace {{ .Release.Namespace }}.
+
+  UI:        {{ .Values.publicBaseUrl }}
+  Pool:      {{ .Values.lab.poolSize }} warm labs, max {{ .Values.lab.maxConcurrent }} concurrent, TTL {{ .Values.lab.ttl }}
+{{- if not .Values.devSecrets.create }}
+
+Needs Secrets "{{ .Values.api.existingSecret }}" and "{{ .Values.postgres.existingSecret }}"
+in this namespace; see docs/operations.md.
+{{- end }}
+
+Mint a session without Google (curl/tests):
+  kubectl -n {{ .Release.Namespace }} exec deploy/labforge-api -- node dist/mint-session.js <user-id>

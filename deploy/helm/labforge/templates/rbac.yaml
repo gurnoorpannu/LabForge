@@ -1,0 +1,92 @@
+# One ServiceAccount + ClusterRole per component, each with only the verbs its
+# code calls. No wildcards. Check with:
+#   kubectl auth can-i --list --as=system:serviceaccount:<ns>:labforge-api
+#
+# Limitation: ClusterRoles can't be limited to namespaces named lab-*, so
+# create/patch grants apply cluster-wide. The tokens only live in these pods,
+# and the isolation suite checks labs can't reach the API server to use them.
+{{- $ns := .Release.Namespace }}
+{{- range $c := list "api" "pool-controller" "reaper" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: labforge-{{ $c }}
+  labels: {{- include "labforge.labels" $ | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: labforge-{{ $c }}
+  labels: {{- include "labforge.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: labforge-{{ $c }}
+subjects:
+  - kind: ServiceAccount
+    name: labforge-{{ $c }}
+    namespace: {{ $ns }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: labforge-api
+  labels: {{- include "labforge.labels" . | nindent 4 }}
+rules:
+  # Cold start creates a lab namespace; end-lab deletes it (cascades to all
+  # objects inside); warm claim patches its owner/expiry labels+annotations.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "get", "delete", "patch"]
+  # Cold start creates the pod; readiness polling gets it; warm claim patches
+  # its expiry annotation and activeDeadlineSeconds.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "patch"]
+  - apiGroups: [""]
+    resources: ["services", "resourcequotas", "limitranges"]
+    verbs: ["create"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies", "ingresses"]
+    verbs: ["create"]
+  # Per-lab ForwardAuth middleware (Traefik 3 CRD group).
+  - apiGroups: ["traefik.io"]
+    resources: ["middlewares"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: labforge-pool-controller
+  labels: {{- include "labforge.labels" . | nindent 4 }}
+rules:
+  # Observe every lab (two list calls per pass), create warm labs, delete
+  # orphaned/recycled ones. Warm labs have no Ingress or Middleware.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "create"]
+  - apiGroups: [""]
+    resources: ["services", "resourcequotas", "limitranges"]
+    verbs: ["create"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: labforge-reaper
+  labels: {{- include "labforge.labels" . | nindent 4 }}
+rules:
+  # Find expired labs by annotation and delete them. Nothing else.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
