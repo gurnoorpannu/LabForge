@@ -29,8 +29,9 @@ const envSchema = z
     // the host alias k3d injects into cluster DNS. Unreachable = access denied.
     AUTH_VERIFY_URL: z.url().default("http://host.k3d.internal:3000/auth/verify"),
 
-    // Signs session cookies. 32+ chars; generate with `openssl rand -hex 32`.
-    SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters"),
+    // Signs session cookies (API only; the API refuses to start without it).
+    // 32+ chars; generate with `openssl rand -hex 32`.
+    SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters").optional(),
     SESSION_TTL: duration.default(12 * 3600),
 
     // Google OIDC. Optional so tests and local dev run without a Google client;
@@ -57,6 +58,11 @@ const envSchema = z
     LAB_TTL: duration.default(45 * 60),
     LAB_READY_TIMEOUT: duration.default(60),
     POOL_SIZE: z.coerce.number().int().min(0).default(3),
+    // Warm labs older than this are recycled, so the pool never serves a stale image.
+    POOL_MAX_AGE: duration.default(6 * 3600),
+    POOL_RECONCILE_INTERVAL: duration.default(5),
+    // Pool controller's /metrics + /healthz port.
+    METRICS_PORT: z.coerce.number().int().positive().default(9090),
     // Default 10: 2 nodes x 2 OCPU, ~1 CPU reserved for system pods, 250m request
     // per lab -> ~12 schedulable; 10 leaves headroom. Memory is not the binding limit.
     MAX_CONCURRENT_LABS: z.coerce.number().int().positive().default(10),
@@ -90,6 +96,7 @@ const envSchema = z
     authVerifyUrl: c.AUTH_VERIFY_URL,
     databaseUrl: c.DATABASE_URL,
     rateLimitPerMin: c.RATE_LIMIT_PER_MIN,
+    metricsPort: c.METRICS_PORT,
     session: {
       secret: c.SESSION_SECRET,
       ttlSeconds: c.SESSION_TTL,
@@ -114,6 +121,8 @@ const envSchema = z
       ttlSeconds: c.LAB_TTL,
       readyTimeoutSeconds: c.LAB_READY_TIMEOUT,
       poolSize: c.POOL_SIZE,
+      poolMaxAgeSeconds: c.POOL_MAX_AGE,
+      reconcileIntervalSeconds: c.POOL_RECONCILE_INTERVAL,
       maxConcurrent: c.MAX_CONCURRENT_LABS,
       resources: {
         requests: {

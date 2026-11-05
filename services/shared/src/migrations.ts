@@ -56,4 +56,26 @@ export const MIGRATIONS: ReadonlyArray<{ id: string; sql: string }> = [
       CREATE INDEX sessions_expires_at ON sessions (expires_at);
     `,
   },
+  {
+    id: "003_warm_pool",
+    sql: `
+      -- 'warming': row exists (counts toward the cap) while the pod starts;
+      -- the pool controller flips it to 'ready' once the pod is Ready. Only
+      -- 'ready' labs can be claimed.
+      ALTER TABLE labs DROP CONSTRAINT labs_state_check;
+      ALTER TABLE labs ADD CONSTRAINT labs_state_check
+        CHECK (state IN ('warming', 'ready', 'claimed'));
+      ALTER TABLE labs DROP CONSTRAINT labs_check;
+      ALTER TABLE labs ADD CONSTRAINT labs_claimed_has_owner
+        CHECK (state <> 'claimed' OR (owner_id IS NOT NULL AND expires_at IS NOT NULL));
+
+      -- Liveness of jobs that run briefly (the reaper CronJob): the API turns
+      -- these rows into Prometheus metrics. See docs/adr/0005.
+      CREATE TABLE heartbeats (
+        name          TEXT PRIMARY KEY,
+        last_success  TIMESTAMPTZ NOT NULL,
+        total         BIGINT NOT NULL DEFAULT 0  -- e.g. labs reaped, all time
+      );
+    `,
+  },
 ];

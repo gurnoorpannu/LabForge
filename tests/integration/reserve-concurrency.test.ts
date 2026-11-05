@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const enabled = process.env.INTEGRATION === "1";
 
-describe.skipIf(!enabled)("reserveColdLab under concurrency (Postgres)", () => {
+describe.skipIf(!enabled)("reserveLab under concurrency (Postgres)", () => {
   let pool: pg.Pool;
   let store: LabStore;
   const run = `conc-${Date.now()}`;
@@ -29,7 +29,7 @@ describe.skipIf(!enabled)("reserveColdLab under concurrency (Postgres)", () => {
 
   const reserve = async (ownerId: string, maxLabs: number) => {
     await store.upsertUser(ownerId, null);
-    return store.reserveColdLab({ labId: newLabId(), ownerId, ttlSeconds: 60, maxLabs });
+    return store.reserveLab({ newLabId: newLabId(), ownerId, ttlSeconds: 60, maxLabs });
   };
 
   it("gives one user exactly one lab out of 20 simultaneous requests", async () => {
@@ -54,6 +54,24 @@ describe.skipIf(!enabled)("reserveColdLab under concurrency (Postgres)", () => {
     expect(results.filter((r) => !r.ok && r.reason === "capacity")).toHaveLength(17);
     const { rows } = await pool.query("SELECT count(*)::int AS n FROM labs WHERE deleted_at IS NULL");
     expect(rows[0].n).toBe(4);
+  });
+
+  it("20 parallel starts for 3 warm labs: exactly 3 are served warm, none twice", async () => {
+    await pool.query("UPDATE labs SET deleted_at = now() WHERE deleted_at IS NULL");
+    const warm = [newLabId(), newLabId(), newLabId()];
+    for (const id of warm) {
+      await pool.query("INSERT INTO labs (id, namespace, state) VALUES ($1, $2, 'ready')", [id, `lab-${id}`]);
+    }
+    const results = await Promise.all(
+      Array.from({ length: 20 }, (_, i) => reserve(`${run}-w${i}`, 100)),
+    );
+    const ok = results.flatMap((r) => (r.ok ? [r.lab] : []));
+    expect(ok).toHaveLength(20);
+    const fromPool = ok.filter((l) => l.started_from === "warm");
+    expect(fromPool.map((l) => l.id).sort()).toEqual([...warm].sort()); // each warm lab exactly once
+    expect(ok.filter((l) => l.started_from === "cold")).toHaveLength(17);
+    expect(new Set(ok.map((l) => l.id)).size).toBe(20); // no lab handed to two users
+    expect(new Set(ok.map((l) => l.owner_id)).size).toBe(20);
   });
 
   it("enforces one active lab per user in the database itself (partial unique index)", async () => {
