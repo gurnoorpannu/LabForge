@@ -90,11 +90,15 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # Only Traefik (kube-system) may reach the terminal port 7681.
+    # Only Traefik's pods may reach the terminal port 7681. namespaceSelector and
+    # podSelector in ONE list item = both must match (not "either").
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
       ports:
         - protocol: TCP
           port: 7681

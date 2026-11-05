@@ -43,6 +43,12 @@ const envSchema = z
     INGRESS_CLASS: z.string().default("traefik"),
     // Namespace Traefik runs in; the only source allowed to reach a lab's ttyd port.
     INGRESS_NAMESPACE: z.string().default("kube-system"),
+    // Pod label (key=value) of the ingress controller inside INGRESS_NAMESPACE, so
+    // other kube-system pods (CoreDNS, metrics-server...) can't reach labs either.
+    INGRESS_POD_SELECTOR: z
+      .string()
+      .regex(/^[\w./-]+=[\w.-]+$/, "expected key=value, e.g. app.kubernetes.io/name=traefik")
+      .default("app.kubernetes.io/name=traefik"),
 
     DATABASE_URL: z.string().min(1),
 
@@ -100,6 +106,7 @@ const envSchema = z
       host: c.INGRESS_HOST,
       className: c.INGRESS_CLASS,
       namespace: c.INGRESS_NAMESPACE,
+      podSelector: Object.fromEntries([c.INGRESS_POD_SELECTOR.split("=")]) as Record<string, string>,
     },
     lab: {
       image: c.LAB_IMAGE,

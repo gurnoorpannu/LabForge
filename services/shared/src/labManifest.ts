@@ -217,12 +217,14 @@ function networkPolicy(cfg: Config, p: LabParams): V1NetworkPolicy {
       policyTypes: ["Ingress", "Egress"],
       ingress: [
         {
-          // Only the ingress controller may reach ttyd.
+          // Only the ingress controller's pods may reach ttyd: namespace AND pod
+          // label in one peer (both must match), not any pod in kube-system.
           _from: [
             {
               namespaceSelector: {
                 matchLabels: { "kubernetes.io/metadata.name": cfg.ingress.namespace },
               },
+              podSelector: { matchLabels: cfg.ingress.podSelector },
             },
           ],
           ports: [{ protocol: "TCP", port: TTYD_PORT }],

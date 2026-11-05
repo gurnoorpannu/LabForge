@@ -140,6 +140,11 @@ exports[`buildLab > matches the snapshot (review diffs to this file carefully) 1
                   "kubernetes.io/metadata.name": "kube-system",
                 },
               },
+              "podSelector": {
+                "matchLabels": {
+                  "app.kubernetes.io/name": "traefik",
+                },
+              },
             },
           ],
           "ports": [

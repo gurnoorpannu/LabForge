@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help install typecheck lint test test-integration dev-up dev-down dev-db dev-db-down \
-        rbac api-run mint-session lab-image lab-image-import lab-example-up lab-example-down infra-plan
+        rbac api-run mint-session test-security lab-image lab-image-import lab-example-up lab-example-down infra-plan
 
 # --- Local dev config ---
 # (Comments go on their own line: Make keeps the spaces before a trailing `#`
@@ -46,6 +46,10 @@ test-integration:
 	INTEGRATION=1 DATABASE_URL=$(DATABASE_URL) NODE_CIDR=$(NODE_CIDR) \
 	  npx vitest run tests/integration --no-file-parallelism
 
+## test-security: Lab isolation suite against the current cluster (SECURITY_REPORT=file to save the table)
+test-security:
+	SECURITY=1 NODE_CIDR=$(NODE_CIDR) npx vitest run tests/security
+
 ## dev-db: Start a local Postgres 16 in Docker on :$(DB_PORT)
 dev-db:
 	docker run -d --name labforge-db -p $(DB_PORT):5432 \
@@ -76,6 +80,7 @@ dev-up:
 	k3d cluster create $(CLUSTER) \
 	  --servers 1 --agents 1 \
 	  --subnet $(NODE_CIDR) \
+	  --volume "$(CURDIR)/infra/kubelet/10-labforge.conf:/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-labforge.conf@server:*;agent:*" \
 	  -p "$(HTTP_PORT):80@loadbalancer" \
 	  --wait
 	kubectl cluster-info

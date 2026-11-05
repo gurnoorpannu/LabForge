@@ -91,12 +91,18 @@ describe("buildLab", () => {
     expect(pod.spec?.activeDeadlineSeconds).toBe(TTL + EXPIRY_GRACE_SECONDS);
   });
 
-  it("allows ingress only from the ingress controller namespace, on 7681", () => {
+  it("allows ingress only from the ingress controller pods, on 7681", () => {
     const np = byKind<V1NetworkPolicy>(claimed(), "NetworkPolicy");
     expect(np.spec?.policyTypes).toEqual(["Ingress", "Egress"]);
     expect(np.spec?.ingress).toEqual([
       {
-        _from: [{ namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "kube-system" } } }],
+        // namespace AND pod label in one peer: Traefik only, not all of kube-system
+        _from: [
+          {
+            namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "kube-system" } },
+            podSelector: { matchLabels: { "app.kubernetes.io/name": "traefik" } },
+          },
+        ],
         ports: [{ protocol: "TCP", port: 7681 }],
       },
     ]);
