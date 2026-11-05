@@ -20,6 +20,12 @@ spec:
   syncPolicy:
     automated: { prune: true, selfHeal: true }
     syncOptions: [CreateNamespace=true]
+    # The ServiceMonitors need kube-prometheus-stack's CRDs; on a fresh cluster
+    # the first sync can fail until they exist. Automated sync doesn't retry a
+    # failed revision on its own.
+    retry:
+      limit: 10
+      backoff: { duration: 30s, factor: 2, maxDuration: 5m }
     managedNamespaceMetadata:
       labels:
         pod-security.kubernetes.io/enforce: restricted
