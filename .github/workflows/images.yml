@@ -1,0 +1,101 @@
+name: images
+
+# main: build all four images for amd64 + arm64, gate on Trivy (CRITICAL),
+# push to GHCR tagged with the git SHA, then bump values-prod.yaml so ArgoCD
+# deploys it. PRs: build + scan only, nothing pushed.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - deploy/helm/labforge/values-prod.yaml # the bump commit below
+      - "docs/**"
+      - "**.md"
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io/${{ github.repository_owner }}
+  TRIVY_IMAGE: aquasec/trivy:0.76.2
+
+jobs:
+  build:
+    name: build ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to GHCR (only used on main)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: api, context: ., file: services/Dockerfile, args: "SERVICE=api" }
+          - { image: pool-controller, context: ., file: services/Dockerfile, args: "SERVICE=pool-controller" }
+          - { image: reaper, context: ., file: services/Dockerfile, args: "SERVICE=reaper" }
+          - { image: lab, context: images/lab, file: images/lab/Dockerfile, args: "" }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # Scan before anything is pushed: build amd64 into the local daemon.
+      - name: Build for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          build-args: ${{ matrix.args }}
+          platforms: linux/amd64
+          load: true
+          tags: scan/labforge-${{ matrix.image }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      - name: Trivy (fail on CRITICAL)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" image \
+            --exit-code 1 --severity CRITICAL --ignore-unfixed --no-progress \
+            scan/labforge-${{ matrix.image }}:${{ github.sha }}
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build multi-arch and push
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          build-args: ${{ matrix.args }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/labforge-${{ matrix.image }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/labforge-${{ matrix.image }}:latest
+          cache-from: type=gha,scope=${{ matrix.image }}
+
+  bump:
+    name: bump deployed tag
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # commit the new tag
+    steps:
+      - uses: actions/checkout@v5
+      - name: Point values-prod.yaml at this build
+        run: |
+          sed -i -E "0,/^  tag: .*/s//  tag: \"${GITHUB_SHA}\"/" deploy/helm/labforge/values-prod.yaml
+          grep -n '^  tag:' deploy/helm/labforge/values-prod.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/helm/labforge/values-prod.yaml
+          git diff --cached --quiet && exit 0
+          git commit -m "chore(deploy): images ${GITHUB_SHA::7} [skip ci]"
+          git push

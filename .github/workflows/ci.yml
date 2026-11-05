@@ -10,26 +10,66 @@ permissions:
 
 jobs:
   node:
-    name: typecheck / lint / test
+    name: typecheck / lint / unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
       - uses: actions/setup-node@v5
         with:
           # Node 24 LTS. Floor is 22.19: @kubernetes/client-node 2.x pulls in
           # undici 8, which needs zlib zstd support.
           node-version: "24"
           cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
 
-      - name: Install dependencies
-        run: npm ci
+  helm:
+    name: helm lint / kubeconform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/setup-helm@v4
+      - name: helm lint
+        run: |
+          for v in local prod; do
+            helm lint deploy/helm/labforge -f deploy/helm/labforge/values-$v.yaml
+          done
+      - name: kubeconform (chart + Kubernetes manifests)
+        run: |
+          KC="docker run --rm -i ghcr.io/yannh/kubeconform:v0.7.0 -strict -summary
+            -kubernetes-version 1.33.0 -schema-location default
+            -schema-location https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json"
+          for v in local prod; do
+            helm template labforge deploy/helm/labforge -n labforge -f deploy/helm/labforge/values-$v.yaml | $KC -
+          done
+          # "---" between files, or the last doc of one merges with the next's first.
+          { for f in deploy/argocd/*.yaml deploy/cluster/*.yaml; do cat "$f"; echo "---"; done
+            kubectl kustomize deploy/monitoring/manifests; } | $KC -
 
-      - name: Lint
-        run: npm run lint
+  terraform:
+    name: terraform fmt / validate / tflint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+      - uses: terraform-linters/setup-tflint@v4
+      - run: tflint --init && tflint
 
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Test
-        run: npm test
+  ansible:
+    name: ansible-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ansible-lint
+      - run: ansible-lint infra/ansible
