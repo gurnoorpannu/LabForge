@@ -1,66 +1,103 @@
 # LabForge
 
-Self-service platform that gives a user a **temporary, isolated Linux terminal in the browser**.
+[![ci](https://github.com/gurnoorpannu/LabForge/actions/workflows/ci.yml/badge.svg)](https://github.com/gurnoorpannu/LabForge/actions/workflows/ci.yml)
+[![images](https://github.com/gurnoorpannu/LabForge/actions/workflows/images.yml/badge.svg)](https://github.com/gurnoorpannu/LabForge/actions/workflows/images.yml)
 
-Log in with Google → **Start Lab** → within seconds you get a link to a real Ubuntu shell in the
-browser. The lab **auto-destroys after 45 minutes** and everything inside is wiped. One active lab
-per user; a cluster-wide cap on concurrent labs returns a clear `503 + Retry-After` when full.
+A self-service platform that gives you a **temporary, isolated Linux terminal in the browser**.
 
-Each lab = one Kubernetes namespace (one Ubuntu + `ttyd` pod) plus isolation objects (quota,
-network policy, restricted pod security).
+Log in with Google → **Start lab** → about half a second later (warm pool) you have a real Ubuntu
+shell at `https://labs.gurnoor.online/lab/<id>/`. It's destroyed after 45 minutes and everything in it
+is wiped. One lab per user; when the cluster is full you get `503` with `Retry-After`.
 
-> Portfolio project for SRE / Cloud / DevOps. Built phase by phase — see [SPEC](SPEC.md).
+Each lab is its own Kubernetes namespace: one hardened pod (Ubuntu + ttyd), a default-deny
+NetworkPolicy, a quota, and an Ingress that only its owner gets through.
 
-## Status
+```mermaid
+flowchart LR
+  user((Browser)) -- HTTPS --> traefik[Traefik + ForwardAuth]
+  traefik -- "/, /auth, /api" --> api[API: OIDC, labs, /auth/verify]
+  traefik -- "/lab/&lt;id&gt;/ owner only" --> lab["lab-&lt;id&gt;: ttyd pod<br/>default-deny netpol, quota"]
+  traefik -. verify .-> api
+  api --> pg[(Postgres)]
+  pool[pool controller x2<br/>advisory-lock leader] --> pg
+  reaper[reaper CronJob] --> pg
+  api & pool & reaper --> k8s[Kubernetes API]
+  prom[Prometheus / Alertmanager] -- alerts --> discord[Discord]
+```
 
-| Phase | Scope | State |
-|-------|-------|-------|
-| 0 | Scaffolding (repo, CI, workspaces) | ✅ done |
-| 1 | Local k3d cluster + lab image | ✅ verified on k3d |
-| 2 | API core (cold start) | ✅ verified on k3d |
-| 3 | Auth + ForwardAuth | ✅ verified on k3d (Google login pending your OAuth client) |
-| 4 | Isolation hardening | ⬜ |
-| 5 | Lifecycle: reaper, warm pool, claiming | ⬜ |
-| 6 | Observability | ⬜ |
-| 7 | Helm chart + CI/CD | ⬜ |
-| 8 | Cloud infra (OCI) | ⬜ |
-| 9 | Load tests + write-up | ⬜ |
+More: [architecture](docs/architecture.md) · [failure modes](docs/failure-modes.md) ·
+[runbooks](docs/runbooks/) · [ADRs](docs/adr/) · [deploying to OCI](docs/operations.md)
 
-## Tech stack
+## Measured results
 
-k3s (prod) / k3d (local) · Node 24 + TypeScript + Fastify · Postgres 16 · Traefik + cert-manager ·
-Helm + ArgoCD · kube-prometheus-stack · Terraform (OCI) + Ansible · GitHub Actions + GHCR.
+From [docs/results.md](docs/results.md); every number there has the command that produced it.
+Local k3d on a laptop (Apple M4); production numbers come after the OCI deploy.
 
-## Quickstart (local)
+| | p50 | p95 | n |
+|---|---|---|---|
+| Click → working terminal, **warm** | 499 ms | 1.01 s | 9 |
+| Click → working terminal, **cold** | 2.85 s | 4.84 s | 21 |
+| Authenticated request through ForwardAuth (end to end) | 1.3 ms | 48.5 ms | 600 |
+| `/auth/verify` server side | 0.64 ms | 5.7 ms | 971 |
 
-Requires Node 22.19+ (24 LTS recommended), Docker, and (from Phase 1) `k3d` + `kubectl` + `helm`.
+- 15 users at once against a cap of 10 → exactly 10 labs, 5 × `503 Retry-After: 60`.
+- Isolation suite: **39/39** attacks from inside a lab blocked or contained (API server, kubelets,
+  other labs, cloud metadata, platform services, fork bomb, memory and disk bombs).
+- 20 parallel starts for 3 warm labs → exactly 3 served warm, no lab assigned twice.
+
+## What's in it
+
+| Area | Details |
+|---|---|
+| **Isolation** | namespace per lab, `restricted` Pod Security, non-root, read-only root FS, no capabilities, seccomp, no SA token; NetworkPolicy blocks pod/service/**node** CIDRs and cloud metadata (the node CIDR matters: the API server's ClusterIP is DNAT'd to a node IP before policy runs); kubelet PID limit + single-process OOM kill; `tini` as PID 1 |
+| **Auth** | Google OIDC (PKCE, state, nonce), hashed server-side sessions in signed HttpOnly cookies, Traefik ForwardAuth with the lab id bound in the Middleware (no path-confusion bypass, [ADR-0001](docs/adr/0001-forwardauth-binds-lab-id.md)) |
+| **Lifecycle** | warm pool with Postgres advisory-lock leader election, atomic `FOR UPDATE SKIP LOCKED` claims, partial unique index for one lab per user, two-layer cleanup (reaper + `activeDeadlineSeconds`), drift repair both ways |
+| **Observability** | Prometheus metrics (start latency warm/cold, verify latency, pool, reaper heartbeat), 5 alerts with runbooks, Grafana dashboard, Alertmanager → Discord |
+| **Delivery** | Helm chart, Argo CD (prune + self-heal), GitHub Actions: tests, helm lint, kubeconform, terraform validate + tflint, ansible-lint; multi-arch images, Trivy gate, GHCR, automatic tag bump |
+| **Infra** | Terraform (OCI VCN + 2 Ampere A1 VMs, Always Free), Ansible (hardening, OCI firewall quirks, pinned k3s), cert-manager + Let's Encrypt |
+
+## Run it locally
+
+Needs Docker, [k3d](https://k3d.io), kubectl, helm, Node 22.19+ (24 recommended).
 
 ```bash
-make install      # install JS deps
-make lint         # lint
-make typecheck    # type-check all workspaces
-make test         # unit tests
-make help         # list all targets
+npm install
+make up                       # k3d cluster + build 4 images + Helm chart (~5 min first time)
+open http://localhost:8080    # UI; no Google client locally, so mint a session:
+kubectl -n labforge exec deploy/labforge-api -- node dist/mint-session.js alice
 ```
+
+Paste the printed `lf_session=...` into the browser's cookies for `localhost`, or use curl:
+
+```bash
+COOKIE=$(kubectl -n labforge exec deploy/labforge-api -- node dist/mint-session.js alice)
+curl -s -XPOST localhost:8080/api/labs -H "cookie: $COOKIE"     # -> {"labId":..., "url":..., "startedFrom":"warm"}
+```
+
+Tests:
+
+```bash
+make test                # unit tests (no cluster)
+make test-integration    # k3d + a host Postgres: make dev-db [DB_PORT=5433]; scale the chart's pool-controller to 0 first
+make test-e2e            # the deployed chart, through Traefik (includes 2 m expiry checks, ~7 min)
+make test-security       # isolation suite; SECURITY_REPORT=file writes the table
+make load-test USERS=10  # k6
+```
+
+`make help` lists everything. More detail in [deploy/local/README.md](deploy/local/README.md).
+
+## Deploy to OCI
+
+Step by step, including the accounts, secrets and DNS you provide: [docs/operations.md](docs/operations.md).
+In short: `make infra-plan` → `make infra-apply` → `make provision` → create Secrets → `make bootstrap`.
 
 ## Repo layout
 
 ```
-infra/        Terraform (OCI) + Ansible (k3s install, hardening)
-images/lab/   Lab terminal image (Ubuntu + ttyd)
-services/     api, pool-controller, reaper, shared (TypeScript)
-deploy/       Helm chart, ArgoCD Application, monitoring
-tests/        integration (k3d), security (isolation), load (k6)
-docs/         architecture, failure modes, runbooks, ADRs, measured results
+services/   api, pool-controller, reaper, shared (TypeScript, Node 24)
+images/lab/ lab image (Ubuntu 24.04 + ttyd + tini)
+deploy/     helm/labforge chart, argocd apps, cluster add-ons, monitoring
+infra/      terraform (OCI), ansible (k3s), kubelet drop-in
+tests/      integration, security, e2e, load (k6), monitoring
+docs/       architecture, failure modes, runbooks, ADRs, results, operations
 ```
-
-## Results
-
-Real measured numbers (warm vs cold start, isolation proofs, load behaviour) land in
-[docs/results.md](docs/results.md) in Phase 9 — every number paired with the command that produced
-it. No invented benchmarks.
-
-## Security notes
-
-No secrets in git (see `.gitignore`). Each service ships a `.env.example`; real OIDC secrets,
-Discord webhooks, kubeconfigs, and OCI keys are provided out-of-band (K8s Secrets / local files).

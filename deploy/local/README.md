@@ -1,14 +1,47 @@
-# Local dev (Phases 1–3)
+# Local development
 
-Hand-written example lab so each Kubernetes object is understood before the API generates it in code,
-plus the API running on your Mac against a local k3d cluster.
+Two ways to run LabForge on a laptop:
+
+| Mode | Command | Use it for |
+|---|---|---|
+| **Whole stack in k3d** (like prod) | `make up` | Normal use, `make test-e2e`, `make test-security`, `make load-test`, monitoring |
+| **API on your Mac** against k3d + a Docker Postgres | `make api-run` | Fast edit-run loops on the API, `make test-integration` |
+
+Don't run both against the same cluster at once: the chart's pool controller deletes lab namespaces
+that have no row in *its* database (after a 2-minute grace), which includes labs made by a host-run
+API and the hand-written demo lab below. For the second mode, first
+`kubectl -n labforge scale deploy/labforge-pool-controller --replicas=0` (or `make chart-down`).
 
 ## Prerequisites
 
 - Docker running
-- [`k3d`](https://k3d.io) (`brew install k3d`)
-- [`helm`](https://helm.sh) (`brew install helm`): not needed until later phases
-- `kubectl`
+- [`k3d`](https://k3d.io), [`helm`](https://helm.sh), `kubectl` (`brew install k3d helm kubectl`)
+- Node 22.19+ (24 LTS recommended)
+
+## Whole stack (`make up`)
+
+```bash
+make up                    # k3d + 4 images (arm64) + chart with values-local.yaml
+open http://localhost:8080
+kubectl -n labforge exec deploy/labforge-api -- node dist/mint-session.js alice   # a session cookie
+make chart-up              # re-deploy after changing values; images: make images images-import
+```
+
+Monitoring (optional, ~1.5 GB of images):
+
+```bash
+kubectl create namespace monitoring
+kubectl -n monitoring create secret generic grafana-admin --from-literal=admin-user=admin --from-literal=admin-password=$(openssl rand -hex 16)
+kubectl -n monitoring create secret generic alertmanager-discord \
+  --from-literal=webhook-url=http://webhook-sink.monitoring.svc.cluster.local:8080/discord-webhook
+kubectl apply -f tests/monitoring/webhook-sink.yaml        # logs alerts instead of posting to Discord
+helm upgrade --install kps prometheus-community/kube-prometheus-stack --version 92.20.0 \
+  -n monitoring -f deploy/monitoring/kube-prometheus-stack-values.yaml --wait --timeout 10m
+kubectl apply -k deploy/monitoring/manifests
+helm upgrade labforge deploy/helm/labforge -n labforge -f deploy/helm/labforge/values-local.yaml \
+  --set monitoring.serviceMonitors=true
+kubectl -n monitoring logs deploy/webhook-sink -f            # alerts arrive here
+```
 
 ## Run the example lab (Phase 1)
 
