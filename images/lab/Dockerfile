@@ -4,7 +4,9 @@ FROM ubuntu:24.04
 
 # ttyd (web terminal) lives in the universe component on 24.04.
 # --no-install-recommends + cleanup keeps the layer small.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# `upgrade` pulls in Ubuntu security fixes newer than the base image (Trivy
+# flagged apt itself otherwise).
+RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-recommends \
       ttyd \
       bash \
       ca-certificates \
