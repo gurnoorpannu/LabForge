@@ -6,7 +6,6 @@ import {
   labRequests,
   labStartDuration,
   newLabId,
-  registry,
   setDbMetricsSource,
   type Config,
   type K8s,
@@ -69,10 +68,6 @@ export async function buildServer({ config, store, sessions, k8s, logger = true 
     const checks = { db: db.status === "fulfilled", k8s: kube.status === "fulfilled" };
     return reply.code(checks.db && checks.k8s ? 200 : 503).send({ checks });
   });
-
-  app.get("/metrics", { config: { skipSession: true } }, async (_req, reply) =>
-    reply.header("content-type", registry.contentType).send(await registry.metrics()),
-  );
 
   // --- labs -----------------------------------------------------------------
 

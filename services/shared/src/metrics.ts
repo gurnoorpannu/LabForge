@@ -1,9 +1,25 @@
+import { createServer, type Server } from "node:http";
 import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from "prom-client";
 import type { LabStats } from "./labStore.js";
 
 // One registry per process.
 export const registry = new Registry();
 collectDefaultMetrics({ register: registry });
+
+/**
+ * /metrics (and /healthz) on their own port. Kept off the public HTTP port so
+ * the Ingress, which routes "/" to the API, can never expose them.
+ */
+export function startMetricsServer(port: number): Server {
+  return createServer(async (req, res) => {
+    if (req.url === "/metrics") {
+      res.setHeader("content-type", registry.contentType);
+      return res.end(await registry.metrics());
+    }
+    res.statusCode = req.url === "/healthz" ? 200 : 404;
+    res.end();
+  }).listen(port, "0.0.0.0");
+}
 
 /**
  * Where the DB-derived metrics come from. The API sets it; every scrape then

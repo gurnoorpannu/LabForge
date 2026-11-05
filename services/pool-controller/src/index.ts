@@ -1,8 +1,7 @@
 // @labforge/pool-controller: keeps POOL_SIZE warm labs ready and fixes drift
 // between Postgres and the cluster. Run 2 replicas; a Postgres advisory lock
 // makes exactly one of them the leader, the other waits as a hot standby.
-import { createK8s, createLabStore, createPool, loadConfig, LOCK, migrate, registry } from "@labforge/shared";
-import { createServer } from "node:http";
+import { createK8s, createLabStore, createPool, loadConfig, LOCK, migrate, registry, startMetricsServer } from "@labforge/shared";
 import pg from "pg";
 import pino from "pino";
 import { Counter, Gauge, Histogram } from "prom-client";
@@ -33,14 +32,7 @@ const reconcileErrors = new Counter({
 });
 
 // /metrics for Prometheus, /healthz for the liveness probe.
-createServer(async (req, res) => {
-  if (req.url === "/metrics") {
-    res.setHeader("content-type", registry.contentType);
-    return res.end(await registry.metrics());
-  }
-  res.statusCode = req.url === "/healthz" ? 200 : 404;
-  res.end();
-}).listen(config.metricsPort, "0.0.0.0");
+startMetricsServer(config.metricsPort);
 
 // Session-level advisory locks belong to one connection, so the leader lock gets
 // a dedicated client. If that connection drops, Postgres releases the lock; we

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { registry } from "@labforge/shared";
 import { setup } from "./test-helpers.js";
 
 describe("lab API", () => {
@@ -135,7 +136,7 @@ describe("warm pool", () => {
     backend.addWarmLab("warmlab000000002");
     await app.inject({ method: "POST", url: "/api/labs", headers: await as("alice") });
     await backend.store.heartbeat("reaper", 3);
-    const body = (await app.inject({ method: "GET", url: "/metrics" })).body;
+    const body = await registry.metrics();
     expect(body).toMatch(/^labforge_labs_active 1$/m);
     expect(body).toMatch(/^labforge_pool_ready\{state="ready"\} 1$/m);
     expect(body).toMatch(/^labforge_labs_reaped_total 3$/m);
@@ -243,15 +244,16 @@ describe("health + metrics", () => {
     expect((await app.inject({ method: "GET", url: "/healthz" })).json()).toEqual({ status: "ok" });
   });
 
-  it("/metrics exposes lab and auth-verify metrics", async () => {
+  it("records lab and auth-verify metrics, and keeps /metrics off the public port", async () => {
     const { app, as } = await setup();
     const alice = await as("alice");
     const { labId } = (await app.inject({ method: "POST", url: "/api/labs", headers: alice })).json();
     await app.inject({ method: "GET", url: `/auth/verify?lab=${labId}`, headers: alice });
-    const res = await app.inject({ method: "GET", url: "/metrics" });
-    expect(res.headers["content-type"]).toContain("text/plain");
-    expect(res.body).toContain('labforge_lab_requests_total{result="created"}');
-    expect(res.body).toContain("labforge_lab_start_duration_seconds_bucket");
-    expect(res.body).toContain('labforge_auth_verify_duration_seconds_count{result="allowed"}');
+    const body = await registry.metrics();
+    expect(body).toContain('labforge_lab_requests_total{result="created"}');
+    expect(body).toContain("labforge_lab_start_duration_seconds_bucket");
+    expect(body).toContain('labforge_auth_verify_duration_seconds_count{result="allowed"}');
+    // Not on the public port: the Ingress routes "/" here.
+    expect((await app.inject({ method: "GET", url: "/metrics" })).statusCode).toBe(404);
   });
 });
