@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help install typecheck lint test test-integration dev-up dev-down dev-db dev-db-down \
-        api-run mint-session test-security test-e2e images images-import chart-up chart-down up lab-image lab-image-import lab-example-up lab-example-down infra-init infra-plan infra-apply provision bootstrap
+        api-run mint-session test-security test-e2e load-test images images-import chart-up chart-down up lab-image lab-image-import lab-example-up lab-example-down infra-init infra-plan infra-apply provision bootstrap
 
 # --- Local dev config ---
 # (Comments go on their own line: Make keeps the spaces before a trailing `#`
@@ -113,6 +113,11 @@ up: dev-up images images-import chart-up
 test-e2e:
 	$(MAKE) chart-up EXTRA_VALUES=deploy/helm/labforge/values-e2e.yaml
 	E2E=1 LABFORGE_URL=http://localhost:$(HTTP_PORT) npx vitest run tests/e2e
+
+## load-test: k6: USERS start labs at once (default 10); OUT=file keeps the k6 summary
+USERS ?= 10
+load-test:
+	tests/load/run.sh $(USERS) $(OUT)
 
 ## lab-image: Build the lab terminal image for the local (arm64) node
 lab-image:
