@@ -114,7 +114,7 @@ test-e2e:
 	$(MAKE) chart-up EXTRA_VALUES=deploy/helm/labforge/values-e2e.yaml
 	E2E=1 LABFORGE_URL=http://localhost:$(HTTP_PORT) npx vitest run tests/e2e
 
-## load-test: k6: USERS start labs at once (default 10); OUT=file keeps the k6 summary
+## load-test: k6: USERS start labs at once (default 10); OUT=file keeps raw samples for summarize.py
 USERS ?= 10
 load-test:
 	tests/load/run.sh $(USERS) $(OUT)
