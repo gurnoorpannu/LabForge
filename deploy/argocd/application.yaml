@@ -1,0 +1,27 @@
+# LabForge itself: the Helm chart with values-prod.yaml. CI bumps the image tag
+# in that file on every main build; ArgoCD notices and rolls it out.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: labforge
+  namespace: argocd
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/gurnoorpannu/LabForge.git
+    targetRevision: main
+    path: deploy/helm/labforge
+    helm:
+      valueFiles: [values-prod.yaml]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: labforge
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]
+    managedNamespaceMetadata:
+      labels:
+        pod-security.kubernetes.io/enforce: restricted
+  # Lab namespaces are created by the API at runtime, not by this chart, so
+  # ArgoCD never sees (or prunes) them.

@@ -1,0 +1,46 @@
+# kube-prometheus-stack (chart from its Helm repo, values from this git repo),
+# plus LabForge's alerts and dashboard.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 92.20.0
+      helm:
+        releaseName: kps
+        valueFiles: [$repo/deploy/monitoring/kube-prometheus-stack-values.yaml]
+    - repoURL: https://github.com/gurnoorpannu/LabForge.git
+      targetRevision: main
+      ref: repo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    # The operator's CRDs are too large for client-side apply annotations.
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: labforge-monitoring
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/gurnoorpannu/LabForge.git
+    targetRevision: main
+    path: deploy/monitoring/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    retry:
+      limit: 10
+      backoff: { duration: 30s, factor: 2, maxDuration: 5m }

@@ -50,3 +50,8 @@ npm-debug.log*
 # --- Misc ---
 *.log
 tmp/
+
+# --- Terraform/Ansible local artifacts ---
+infra/terraform/backend.hcl
+infra/terraform/tfplan
+infra/ansible/kubeconfig

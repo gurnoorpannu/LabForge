@@ -1,0 +1,85 @@
+---
+- name: Upgrade all packages
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+    upgrade: dist
+
+- name: Install security and firewall tooling
+  ansible.builtin.apt:
+    name: [unattended-upgrades, fail2ban, iptables-persistent, netfilter-persistent]
+    state: present
+
+- name: Enable unattended security upgrades
+  ansible.builtin.copy:
+    src: 20auto-upgrades
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: "0644"
+
+- name: Harden SSH (keys only, no root login)
+  ansible.builtin.copy:
+    src: sshd-hardening.conf
+    dest: /etc/ssh/sshd_config.d/10-labforge.conf
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Restart ssh
+
+- name: Start fail2ban (Ubuntu enables the sshd jail by default)
+  ansible.builtin.systemd_service:
+    name: fail2ban
+    state: started
+    enabled: true
+
+# --- OCI firewall gotcha ------------------------------------------------------
+# OCI's Ubuntu images ship /etc/iptables/rules.v4 that end INPUT with a REJECT
+# (only 22 open) and REJECT everything in FORWARD. The VCN security list is
+# the real perimeter; these host rules must let k3s through.
+
+- name: Accept inbound HTTP/HTTPS and the Kubernetes API
+  ansible.builtin.iptables:
+    chain: INPUT
+    action: insert
+    protocol: tcp
+    destination_port: "{{ item }}"
+    ctstate: [NEW]
+    jump: ACCEPT
+    comment: "labforge: {{ item }}/tcp"
+  loop: ["80", "443", "6443"]
+  notify: Save iptables
+
+- name: Accept everything from the other nodes and from pods
+  # Covers flannel VXLAN (8472/udp), kubelet (10250), metrics-server and
+  # Prometheus scraping node-exporter (9100) across nodes.
+  ansible.builtin.iptables:
+    chain: INPUT
+    action: insert
+    source: "{{ item }}"
+    jump: ACCEPT
+    comment: "labforge: from {{ item }}"
+  loop: ["{{ node_cidr }}", "{{ k3s_pod_cidr }}"]
+  notify: Save iptables
+
+- name: Remove OCI's blanket FORWARD reject (it breaks pod-to-pod traffic)
+  ansible.builtin.iptables:
+    chain: FORWARD
+    jump: REJECT
+    reject_with: icmp-host-prohibited
+    state: absent
+  notify: Save iptables
+
+- name: Persist the firewall now, before k3s adds its own (runtime) rules
+  ansible.builtin.meta: flush_handlers
+
+# --- kubelet settings LabForge depends on -------------------------------------
+- name: Create the k3s kubelet drop-in directory
+  ansible.builtin.file:
+    path: "{{ k3s_kubelet_dropin_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Install the kubelet drop-in (PID limit, single-process OOM kill)
+  ansible.builtin.copy:
+    # Same file the local k3d cluster mounts.
+    src: "{{ playbook_dir }}/../kubelet/10-labforge.conf"
+    dest: "{{ k3s_kubelet_dropin_dir }}/10-labforge.conf"
+    mode: "0600"

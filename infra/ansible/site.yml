@@ -1,0 +1,20 @@
+---
+# Run after `make infra-apply` (Terraform writes inventory.ini):
+#   cd infra/ansible && ansible-playbook site.yml
+- name: Harden and prepare every node
+  hosts: all
+  become: true
+  roles:
+    - base
+
+- name: Install the k3s server
+  hosts: k3s_servers
+  become: true
+  roles:
+    - k3s_server
+
+- name: Join k3s agents
+  hosts: k3s_agents
+  become: true
+  roles:
+    - k3s_agent

@@ -1,0 +1,25 @@
+# Configures the Traefik that k3s bundles (chart 39.0.7, Traefik 3.6.13).
+# k3s merges this into its own HelmChart values.
+#  - every http:// request is redirected to https://
+#  - websecure already enables TLS for all routers (chart default), and the
+#    default TLS store serves the Let's Encrypt cert from certificate.yaml, so
+#    the API Ingress AND every per-lab Ingress get it without per-namespace secrets
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    ports:
+      web:
+        http:
+          redirections:
+            entryPoint:
+              to: websecure
+              scheme: https
+              permanent: true
+    tlsStore:
+      default:
+        defaultCertificate:
+          secretName: labforge-tls

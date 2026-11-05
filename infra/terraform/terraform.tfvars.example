@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars (git-ignored) and fill in.
+region           = "ap-mumbai-1"
+tenancy_ocid     = "ocid1.tenancy.oc1..aaaa..."
+compartment_ocid = "ocid1.tenancy.oc1..aaaa..." # tenancy OCID = root compartment
+admin_ip         = "203.0.113.7/32"             # curl -s https://checkip.amazonaws.com
+# ssh_public_key_path = "~/.ssh/id_ed25519.pub"

@@ -1,0 +1,5 @@
+---
+# Pinned; same version as the local k3d cluster the project is tested on.
+k3s_version: v1.35.5+k3s1
+k3s_pod_cidr: 10.42.0.0/16
+k3s_kubelet_dropin_dir: /var/lib/rancher/k3s/agent/etc/kubelet.conf.d
