@@ -32,8 +32,8 @@ const POD_DONE = new Set(["Failed", "Succeeded"]);
 
 /**
  * One pass of the control loop: observe the DB (source of truth for
- * assignment) and the cluster, fix drift in both directions, then top the warm
- * pool up to poolSize within the global cap. Idempotent: running it twice in a
+ * assignment) and the cluster, fix drift in both directions, then grow or
+ * shrink the warm pool to poolSize (growing only within the global cap). Idempotent: running it twice in a
  * row changes nothing the second time.
  */
 export async function reconcile({
@@ -73,7 +73,7 @@ export async function reconcile({
     }
   };
 
-  let pooled = 0; // warming + ready labs that survive this pass
+  const pooled: LabRow[] = []; // warming + ready labs that survive this pass
   for (const row of rows) {
     const c = inCluster.get(row.id);
 
@@ -83,7 +83,7 @@ export async function reconcile({
       if (age(row.created_at) > graceSeconds) {
         await store.markDeleted(row.id);
         r.rowsWithoutNamespace.push(row.id);
-      } else if (row.state !== "claimed") pooled++;
+      } else if (row.state !== "claimed") pooled.push(row);
       continue;
     }
 
@@ -103,21 +103,28 @@ export async function reconcile({
       if (c.pod?.ready) {
         await store.markReady(row.id);
         r.readied.push(row.id);
-        pooled++;
+        pooled.push(row);
       } else if (podDead || age(row.created_at) > warmTimeoutSeconds) {
         await retire(row);
-      } else pooled++;
+      } else pooled.push(row);
       continue;
     }
 
     // ready: recycle dead pods and labs past their max age.
     if (podDead || age(row.created_at) > cfg.lab.poolMaxAgeSeconds) await retire(row);
-    else pooled++;
+    else pooled.push(row);
+  }
+
+  // Shrink: POOL_SIZE was lowered. Retire the oldest unclaimed labs first.
+  const excess = pooled.length - cfg.lab.poolSize;
+  if (excess > 0) {
+    const oldest = [...pooled].sort((a, b) => a.created_at.getTime() - b.created_at.getTime());
+    for (const row of oldest.slice(0, excess)) await retire(row);
   }
 
   // Top up the pool. insertWarming enforces the global cap under the same lock
   // the API uses, so the pool can never push the cluster past MAX_CONCURRENT_LABS.
-  for (let i = pooled; i < cfg.lab.poolSize; i++) {
+  for (let i = pooled.length; i < cfg.lab.poolSize; i++) {
     const labId = newLabId();
     if (!(await store.insertWarming(labId, cfg.lab.maxConcurrent))) break; // at capacity
     try {

@@ -75,6 +75,27 @@ describe("pool controller reconcile", () => {
     expect(w.live().every((r) => r.state === "ready")).toBe(true);
   });
 
+  it("shrinks the pool when POOL_SIZE is lowered, retiring the oldest warm labs", async () => {
+    const w = world({ POOL_SIZE: "1" });
+    for (const [id, ageS] of [["warmold000000001", 900], ["warmmid000000001", 600], ["warmnew000000001", 300]] as const) {
+      w.rows.push(w.row(id, "ready", ageS));
+      w.cluster.set(id, w.ns(id, { ready: true, phase: "Running" }, ageS));
+    }
+    const r = await w.run();
+    expect(r.retired).toEqual(["warmold000000001", "warmmid000000001"]);
+    expect(r.created).toEqual([]);
+    expect(w.live().map((x) => x.id)).toEqual(["warmnew000000001"]);
+  });
+
+  it("drains the pool completely at POOL_SIZE=0 but never touches claimed labs", async () => {
+    const w = world({ POOL_SIZE: "0" });
+    w.rows.push(w.row("warm000000000001", "ready", 60), w.row("claimed000000001", "claimed", 60));
+    w.cluster.set("warm000000000001", w.ns("warm000000000001", { ready: true, phase: "Running" }, 60));
+    w.cluster.set("claimed000000001", w.ns("claimed000000001", { ready: true, phase: "Running" }, 60));
+    expect((await w.run()).retired).toEqual(["warm000000000001"]);
+    expect(w.live().map((x) => x.id)).toEqual(["claimed000000001"]);
+  });
+
   it("never exceeds the global cap (ready + claimed <= MAX_CONCURRENT_LABS)", async () => {
     const w = world({ MAX_CONCURRENT_LABS: "2" });
     w.rows.push(w.row("claimedlab000001", "claimed", 10));
