@@ -2,7 +2,7 @@
 # images.tag is rewritten by .github/workflows/images.yml on every main build.
 images:
   registry: ghcr.io/gurnoorpannu
-  tag: latest
+  tag: "1ea9bb91cd2eaf9f725e57111232ea7ef3502538"
   pullPolicy: IfNotPresent
 publicBaseUrl: https://labs.gurnoor.online
 host: labs.gurnoor.online
