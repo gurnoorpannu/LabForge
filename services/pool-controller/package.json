@@ -9,6 +9,9 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@labforge/shared": "*"
+    "@labforge/shared": "*",
+    "pg": "^8.23.1",
+    "pino": "^10.4.0",
+    "prom-client": "^15.1.3"
   }
 }
