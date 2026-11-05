@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       manpages \
       less \
       libcap2-bin \
+      tini \
     # Ubuntu ships ping with cap_net_raw=ep. With all capabilities dropped the
     # kernel refuses to exec a binary whose effective caps it can't grant, so ping
     # fails with EPERM. Strip it; the pod's ping_group_range sysctl lets ping use
@@ -52,4 +53,8 @@ EXPOSE 7681
 # read from the downward API file /etc/labforge/expires-at.
 ENV LAB_ID=""
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+# tini is PID 1 and reaps orphaned processes. ttyd only reaps the shells it
+# spawned, so without an init every orphan a user leaves behind (e.g. a killed
+# job's children) stays a zombie holding a PID until the lab hits its PID limit
+# and can't start anything. Found by `make test-security` (fork-bomb check).
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
