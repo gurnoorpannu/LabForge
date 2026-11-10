@@ -9,6 +9,8 @@ CLUSTER      ?= labforge
 LAB_IMAGE    ?= labforge-lab:dev
 # Host port mapped to the cluster load balancer's :80
 HTTP_PORT    ?= 8080
+# Host port mapped to the cluster load balancer's :443 (used by `make rehearse`)
+HTTPS_PORT   ?= 8443
 # Docker network for the k3d nodes, pinned so the labs' NetworkPolicy can block it
 # (the API server's ClusterIP resolves to a node IP in here). Keep in sync with
 # NODE_CIDR in services/api/.env and deploy/local/lab-example.yaml.
@@ -78,6 +80,7 @@ dev-up:
 	  --subnet $(NODE_CIDR) \
 	  --volume "$(CURDIR)/infra/kubelet/10-labforge.conf:/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-labforge.conf@server:*;agent:*" \
 	  -p "$(HTTP_PORT):80@loadbalancer" \
+	  -p "$(HTTPS_PORT):443@loadbalancer" \
 	  --wait
 	kubectl cluster-info
 
@@ -157,6 +160,8 @@ provision:
 
 ## bootstrap: Install Argo CD on the cluster in KUBECONFIG, then the LabForge Applications
 bootstrap:
-	helm repo add argo https://argoproj.github.io/argo-helm >/dev/null
+	helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
+	@# `repo add` doesn't refetch the index if the repo is already registered.
+	helm repo update argo >/dev/null
 	helm upgrade --install argocd argo/argo-cd --version 10.14.0 -n argocd --create-namespace --wait
 	kubectl apply -f deploy/argocd/cluster.yaml -f deploy/argocd/monitoring.yaml -f deploy/argocd/application.yaml

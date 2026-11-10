@@ -1,6 +1,6 @@
 # Test-only stand-in for Discord: logs every webhook POST it receives, so the
 # alert path (Prometheus -> Alertmanager -> "Discord") can be checked locally
-# without a real webhook. See tests/monitoring/README.md.
+# without a real webhook. See deploy/local/README.md ("Whole stack" -> Monitoring).
 apiVersion: apps/v1
 kind: Deployment
 metadata:

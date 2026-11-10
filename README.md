@@ -91,6 +91,18 @@ make load-test USERS=10  # k6
 Step by step, including the accounts, secrets and DNS you provide: [docs/operations.md](docs/operations.md).
 In short: `make infra-plan` → `make infra-apply` → `make provision` → create Secrets → `make bootstrap`.
 
+## Screenshots (to add)
+
+Capture these once the production deploy is up, into `docs/img/`, and link them here:
+
+- [ ] `ui-start.png`: the UI after login, with **Start lab**
+- [ ] `terminal.png`: a lab terminal showing the expiry banner
+- [ ] `denied.png`: another user's lab URL returning 403
+- [ ] `grafana.png`: the LabForge dashboard during a load test (warm vs cold start panel)
+- [ ] `alert-discord.png`: a PoolEmpty alert in Discord with its runbook link
+- [ ] `argocd.png`: the Argo CD applications, Synced and Healthy
+- [ ] `ci.png`: a green pipeline run (build, Trivy, push, tag bump)
+
 ## Repo layout
 
 ```

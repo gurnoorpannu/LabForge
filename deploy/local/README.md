@@ -120,8 +120,8 @@ API never parses the client-controlled path; see
 query: **200** owner of a live lab, **401** no/invalid session, **403** someone else's lab, or an
 expired/ended one.
 
-`rbac.yaml` holds the API's ServiceAccount and least-privilege ClusterRole (used once the API
-runs in-cluster, Phase 7). `make rbac` applies it; check it with
+RBAC lives in the chart (`deploy/helm/labforge/templates/rbac.yaml`): one ServiceAccount and
+least-privilege ClusterRole per component. Check a permission with
 `kubectl auth can-i create pods --subresource=exec -n lab-x --as=system:serviceaccount:labforge:labforge-api`
 (use `--subresource=`, since `pods/exec` is parsed as a pod *named* `exec`).
 
